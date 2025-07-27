@@ -1,0 +1,579 @@
+# GitLab CI/CD Pipeline - Full Stack Application
+# Author: DevOps Team
+# Version: 3.0.0
+# Description: Efficient CI/CD pipeline for Spring Boot backend + Angular frontend optimized for Kubernetes deployment with Flux
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+    - if: $CI_COMMIT_BRANCH =~ /^hotfix\/.*/
+    - if: $CI_COMMIT_BRANCH =~ /^bugfix\/.*/
+
+variables:
+  # Maven Configuration
+  MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository -Xmx2048m -XX:MaxMetaspaceSize=512m"
+  MAVEN_CLI_OPTS: "--batch-mode --errors --fail-at-end --show-version -DinstallAtEnd=true -DdeployAtEnd=true"
+
+  # Application Configuration
+  BACKEND_APP_NAME: "account-service-backend"
+  FRONTEND_APP_NAME: "account-service-frontend"
+  STAGING_NAMESPACE: "staging"
+
+  # Node.js Configuration
+  NODE_VERSION: "20"
+  NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.npm"
+
+  # SonarQube Configuration
+  SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
+  GIT_DEPTH: "0"
+
+  # Kubernetes Configuration
+  KUBECTL_VERSION: "1.28.4"
+
+  # Database Configuration for Integration Tests
+  MYSQL_ROOT_PASSWORD: "test_password"
+  MYSQL_DATABASE: "test_bank_account_db"
+  MYSQL_USER: "test_user"
+  MYSQL_PASSWORD: "test_password"
+
+# Global cache configurations
+.maven_cache: &maven_cache
+  cache:
+    key: "$CI_COMMIT_REF_SLUG-maven"
+    paths:
+      - .m2/repository/
+    policy: pull-push
+
+.node_cache: &node_cache
+  cache:
+    key: "$CI_COMMIT_REF_SLUG-node"
+    paths:
+      - frontend/bank-account-app/node_modules/
+      - .npm/
+    policy: pull-push
+
+# Change detection rules
+.backend_changes: &backend_changes
+  changes:
+    - backend/**/*
+    - Dockerfile
+    - pom.xml
+
+.frontend_changes: &frontend_changes
+  changes:
+    - frontend/**/*
+    - Dockerfile.frontend
+
+.integration_changes: &integration_changes
+  changes:
+    - backend/**/*
+    - frontend/**/*
+    - Dockerfile
+    - Dockerfile.frontend
+
+# Base job templates
+.java_template: &java_base
+  image: openjdk:21-jdk-slim
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq maven git curl
+    - java --version
+    - mvn --version
+
+.node_template: &node_base
+  image: node:${NODE_VERSION}-alpine
+  before_script:
+    - node --version
+    - npm --version
+    - cd frontend/bank-account-app
+
+.kaniko_template: &kaniko_base
+  image: gcr.io/kaniko-project/executor:v1.9.0-debug
+
+.kubernetes_template: &k8s_base
+  image: bitnami/kubectl:${KUBECTL_VERSION}
+  before_script:
+    - kubectl version --client
+
+stages:
+  - .pre
+  - validate
+  - test
+  - security
+  - build
+  - integration-test
+  - deploy-staging
+  - .post
+
+# =============================================================================
+# PRE-STAGE: Environment Setup and Cache Warming
+# =============================================================================
+
+cache-backend-dependencies:
+  stage: .pre
+  <<: *java_base
+  <<: *maven_cache
+  script:
+    - cd backend
+    - mvn $MAVEN_CLI_OPTS dependency:go-offline
+    - mvn $MAVEN_CLI_OPTS dependency:resolve-sources
+  rules:
+    - <<: *backend_changes
+      if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - <<: *backend_changes
+      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - <<: *backend_changes
+      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+
+cache-frontend-dependencies:
+  stage: .pre
+  <<: *node_base
+  <<: *node_cache
+  script:
+    - npm ci --cache .npm --prefer-offline
+  rules:
+    - <<: *frontend_changes
+      if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - <<: *frontend_changes
+      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - <<: *frontend_changes
+      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+
+# =============================================================================
+# VALIDATION STAGE: Code Quality and Structure Validation
+# =============================================================================
+
+validate-backend:
+  stage: validate
+  <<: *java_base
+  <<: *maven_cache
+  script:
+    - echo "🔍 Validating backend project structure and dependencies..."
+    - cd backend
+    - mvn $MAVEN_CLI_OPTS validate
+    - mvn $MAVEN_CLI_OPTS dependency:analyze
+  artifacts:
+    expire_in: 1 hour
+  rules:
+    - <<: *backend_changes
+      if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - <<: *backend_changes
+      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - <<: *backend_changes
+      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+
+validate-frontend:
+  stage: validate
+  <<: *node_base
+  <<: *node_cache
+  script:
+    - echo "🔍 Validating frontend project structure..."
+    - npm run ng -- version
+    - npm audit --audit-level=high
+  rules:
+    - <<: *frontend_changes
+      if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - <<: *frontend_changes
+      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - <<: *frontend_changes
+      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+
+compile-backend:
+  stage: validate
+  <<: *java_base
+  <<: *maven_cache
+  script:
+    - echo "🏗️ Compiling backend application..."
+    - cd backend
+    - mvn $MAVEN_CLI_OPTS clean compile
+    - mvn $MAVEN_CLI_OPTS compiler:testCompile
+  artifacts:
+    paths:
+      - backend/target/classes/
+      - backend/target/test-classes/
+    expire_in: 2 hours
+  rules:
+    - <<: *backend_changes
+      if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - <<: *backend_changes
+      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - <<: *backend_changes
+      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+
+# =============================================================================
+# TEST STAGE: Unit Tests
+# =============================================================================
+
+backend-unit-tests:
+  stage: test
+  <<: *java_base
+  <<: *maven_cache
+  script:
+    - echo "🧪 Running backend unit tests..."
+    - cd backend
+    - mvn $MAVEN_CLI_OPTS test -Dspring.profiles.active=test
+    - echo "📊 Generating test coverage report..."
+    - mvn jacoco:report
+  coverage: '/Total.*?([0-9]{1,3})%/'
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - backend/target/surefire-reports/TEST-*.xml
+      coverage_report:
+        coverage_format: jacoco
+        path: backend/target/site/jacoco/jacoco.xml
+    paths:
+      - backend/target/surefire-reports/
+      - backend/target/site/jacoco/
+    expire_in: 1 week
+  rules:
+    - <<: *backend_changes
+      if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - <<: *backend_changes
+      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - <<: *backend_changes
+      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+  dependencies:
+    - compile-backend
+
+frontend-unit-tests:
+  stage: test
+  <<: *node_base
+  <<: *node_cache
+  script:
+    - echo "🧪 Running frontend unit tests..."
+    - npm run test -- --no-watch --no-progress --browsers=ChromeHeadlessCI --code-coverage
+  coverage: '/Lines.*?(\d+(?:\.\d+)?)%/'
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - frontend/bank-account-app/coverage/bank-account-app/junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: frontend/bank-account-app/coverage/bank-account-app/cobertura-coverage.xml
+    paths:
+      - frontend/bank-account-app/coverage/
+    expire_in: 1 week
+  rules:
+    - <<: *frontend_changes
+      if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - <<: *frontend_changes
+      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - <<: *frontend_changes
+      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+
+# =============================================================================
+# SECURITY & QUALITY STAGE: SonarQube Analysis and Security Scans
+# =============================================================================
+
+sonarqube-backend:
+  stage: security
+  <<: *java_base
+  <<: *maven_cache
+  variables:
+    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
+    GIT_DEPTH: "0"
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .sonar/cache
+  script:
+    - echo "🔍 Running SonarQube analysis for backend..."
+    - apt-get update -qq && apt-get install -y -qq wget unzip
+    - wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
+    - unzip -q sonar-scanner-cli-5.0.1.3006-linux.zip
+    - export PATH="$PWD/sonar-scanner-5.0.1.3006-linux/bin:$PATH"
+    - cd backend
+    - sonar-scanner
+      -Dsonar.host.url=${SONAR_HOST_URL}
+      -Dsonar.login=${SONAR_TOKEN}
+      -Dsonar.projectKey=${CI_PROJECT_NAME}-backend
+      -Dsonar.projectName="${CI_PROJECT_NAME}-backend"
+      -Dsonar.projectVersion=${CI_COMMIT_SHORT_SHA}
+      -Dsonar.sources=src/main/java
+      -Dsonar.tests=src/test/java
+      -Dsonar.java.binaries=target/classes
+      -Dsonar.java.test.binaries=target/test-classes
+      -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
+      -Dsonar.junit.reportPaths=target/surefire-reports
+      -Dsonar.qualitygate.wait=true
+  rules:
+    - <<: *backend_changes
+      if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - <<: *backend_changes
+      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - <<: *backend_changes
+      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+  dependencies:
+    - backend-unit-tests
+    - compile-backend
+  allow_failure: false
+
+sonarqube-frontend:
+  stage: security
+  <<: *node_base
+  <<: *node_cache
+  script:
+    - echo "🔍 Running SonarQube analysis for frontend..."
+    - apk add --no-cache wget unzip openjdk11-jre
+    - wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
+    - unzip -q sonar-scanner-cli-5.0.1.3006-linux.zip
+    - export PATH="$PWD/sonar-scanner-5.0.1.3006-linux/bin:$PATH"
+    - cd frontend/bank-account-app
+    - sonar-scanner
+      -Dsonar.host.url=${SONAR_HOST_URL}
+      -Dsonar.login=${SONAR_TOKEN}
+      -Dsonar.projectKey=${CI_PROJECT_NAME}-frontend
+      -Dsonar.projectName="${CI_PROJECT_NAME}-frontend"
+      -Dsonar.projectVersion=${CI_COMMIT_SHORT_SHA}
+      -Dsonar.sources=src
+      -Dsonar.tests=src
+      -Dsonar.test.inclusions=**/*.spec.ts
+      -Dsonar.exclusions=**/*.spec.ts,**/node_modules/**
+      -Dsonar.typescript.lcov.reportPaths=coverage/bank-account-app/lcov.info
+      -Dsonar.qualitygate.wait=true
+  rules:
+    - <<: *frontend_changes
+      if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - <<: *frontend_changes
+      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - <<: *frontend_changes
+      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+  dependencies:
+    - frontend-unit-tests
+  allow_failure: false
+
+dependency-security-scan:
+  stage: security
+  <<: *java_base
+  <<: *maven_cache
+  script:
+    - echo "🛡️ Running dependency security scan..."
+    - cd backend
+    - mvn $MAVEN_CLI_OPTS org.owasp:dependency-check-maven:check
+  artifacts:
+    when: always
+    paths:
+      - backend/target/dependency-check-report.html
+    expire_in: 1 week
+  rules:
+    - <<: *backend_changes
+      if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - <<: *backend_changes
+      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  allow_failure: true
+
+# =============================================================================
+# BUILD STAGE: Application Packaging and Container Images
+# =============================================================================
+
+build-backend:
+  stage: build
+  <<: *java_base
+  <<: *maven_cache
+  script:
+    - echo "📦 Building backend application..."
+    - cd backend
+    - mvn $MAVEN_CLI_OPTS clean package -DskipTests
+    - echo "✅ Backend packaged successfully"
+    - ls -la target/
+  artifacts:
+    paths:
+      - backend/target/*.jar
+    expire_in: 1 day
+  rules:
+    - <<: *backend_changes
+      if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - <<: *backend_changes
+      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  dependencies:
+    - compile-backend
+
+build-frontend:
+  stage: build
+  <<: *node_base
+  <<: *node_cache
+  script:
+    - echo "📦 Building frontend application..."
+    - npm run build --prod
+    - echo "✅ Frontend built successfully"
+    - ls -la dist/
+  artifacts:
+    paths:
+      - frontend/bank-account-app/dist/
+    expire_in: 1 day
+  rules:
+    - <<: *frontend_changes
+      if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - <<: *frontend_changes
+      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+build-backend-image:
+  stage: build
+  <<: *kaniko_base
+  script:
+    - echo "🐳 Building backend container image with Kaniko..."
+    - echo "{\"auths\":{\"$CI_REGISTRY\":{\"auth\":\"$(printf "%s:%s" "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" | base64 | tr -d '\n')\"}}}" > /kaniko/.docker/config.json
+    - /kaniko/executor
+      --context "${CI_PROJECT_DIR}"
+      --dockerfile "${CI_PROJECT_DIR}/Dockerfile"
+      --destination "${CI_REGISTRY_IMAGE}/backend:${CI_COMMIT_SHORT_SHA}"
+      --destination "${CI_REGISTRY_IMAGE}/backend:latest"
+      --cache=true
+      --cache-ttl=24h
+  rules:
+    - <<: *backend_changes
+      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  dependencies:
+    - build-backend
+
+build-frontend-image:
+  stage: build
+  <<: *kaniko_base
+  script:
+    - echo "🐳 Building frontend container image with Kaniko..."
+    - echo "{\"auths\":{\"$CI_REGISTRY\":{\"auth\":\"$(printf "%s:%s" "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" | base64 | tr -d '\n')\"}}}" > /kaniko/.docker/config.json
+    - /kaniko/executor
+      --context "${CI_PROJECT_DIR}"
+      --dockerfile "${CI_PROJECT_DIR}/Dockerfile.frontend"
+      --destination "${CI_REGISTRY_IMAGE}/frontend:${CI_COMMIT_SHORT_SHA}"
+      --destination "${CI_REGISTRY_IMAGE}/frontend:latest"
+      --cache=true
+      --cache-ttl=24h
+  rules:
+    - <<: *frontend_changes
+      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  dependencies:
+    - build-frontend
+
+# =============================================================================
+# INTEGRATION TEST STAGE: Full Stack Testing
+# =============================================================================
+
+integration-tests:
+  stage: integration-test
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+    - name: mysql:8.0
+      alias: mysql
+      variables:
+        MYSQL_ROOT_PASSWORD: $MYSQL_ROOT_PASSWORD
+        MYSQL_DATABASE: $MYSQL_DATABASE
+        MYSQL_USER: $MYSQL_USER
+        MYSQL_PASSWORD: $MYSQL_PASSWORD
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+    SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/$MYSQL_DATABASE"
+    SPRING_DATASOURCE_USERNAME: $MYSQL_USER
+    SPRING_DATASOURCE_PASSWORD: $MYSQL_PASSWORD
+  script:
+    - echo "🔗 Running integration tests with real services..."
+    - apk add --no-cache curl openjdk21-jdk maven nodejs npm mysql-client
+
+    # Wait for MySQL to be ready
+    - |
+      echo "Waiting for MySQL to be ready..."
+      for i in {1..30}; do
+        if mysqladmin ping -h mysql -u $MYSQL_USER -p$MYSQL_PASSWORD; then
+          echo "MySQL is ready!"
+          break
+        fi
+        echo "MySQL not ready, waiting..."
+        sleep 2
+      done
+
+    # Run backend integration tests
+    - echo "Running backend integration tests..."
+    - cd backend
+    - mvn test -Dtest=**/*IntegrationTest -Dspring.profiles.active=integration-test
+    - cd ..
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - backend/target/surefire-reports/TEST-*.xml
+    paths:
+      - backend/target/surefire-reports/
+    expire_in: 1 week
+  rules:
+    - <<: *integration_changes
+      if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - <<: *integration_changes
+      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  dependencies:
+    - build-backend
+    - build-frontend
+  allow_failure: false
+
+# =============================================================================
+# DEPLOYMENT STAGE: Kubernetes Deployment via Flux
+# =============================================================================
+
+update-flux-manifests:
+  stage: deploy-staging
+  <<: *k8s_base
+  environment:
+    name: staging
+    url: https://staging.account-service.local
+    deployment_tier: staging
+  script:
+    - echo "🚀 Updating Flux deployment manifests..."
+
+    # Clone Flux GitOps repository
+    - git clone https://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_NAMESPACE}/flux-config.git
+    - cd flux-config
+
+    # Update backend image if it was built
+    - |
+      if [ -f "../backend/target/*.jar" ]; then
+        echo "Updating backend image in Flux manifests..."
+        yq eval ".spec.template.spec.containers[0].image = \"${CI_REGISTRY_IMAGE}/backend:${CI_COMMIT_SHORT_SHA}\"" -i apps/staging/${BACKEND_APP_NAME}/deployment.yaml
+      fi
+
+    # Update frontend image if it was built
+    - |
+      if [ -d "../frontend/bank-account-app/dist" ]; then
+        echo "Updating frontend image in Flux manifests..."
+        yq eval ".spec.template.spec.containers[0].image = \"${CI_REGISTRY_IMAGE}/frontend:${CI_COMMIT_SHORT_SHA}\"" -i apps/staging/${FRONTEND_APP_NAME}/deployment.yaml
+      fi
+
+    # Commit and push changes
+    - git config user.email "ci@${CI_SERVER_HOST}"
+    - git config user.name "GitLab CI/CD"
+    - git add apps/staging/
+    - git commit -m "Deploy ${CI_PROJECT_NAME} ${CI_COMMIT_SHORT_SHA} to staging [skip ci]" || echo "No changes to commit"
+    - git push origin main
+    - echo "✅ Flux manifests updated successfully"
+    - echo "⏳ Flux will automatically sync and deploy the changes"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  dependencies:
+    - build-backend-image
+    - build-frontend-image
+  when: manual
+  allow_failure: false
+
+# =============================================================================
+# POST-STAGE: Cleanup
+# =============================================================================
+
+cleanup-workspace:
+  stage: .post
+  image: alpine:latest
+  script:
+    - echo "🧹 Cleaning up workspace..."
+    - rm -rf backend/target/ || true
+    - rm -rf frontend/bank-account-app/node_modules/ || true
+    - rm -rf frontend/bank-account-app/dist/ || true
+    - rm -rf .m2/repository/ || true
+    - rm -rf .npm/ || true
+    - echo "✅ Workspace cleaned"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+  when: always

@@ -1,0 +1,23 @@
+<div class="app-container">
+  <header class="app-header">
+    <div class="header-content">
+      <h1 class="app-title">Bank Account Management</h1>
+      <nav class="nav-menu">
+        <a routerLink="/accounts" routerLinkActive="active" class="nav-link">
+          Accounts
+        </a>
+        <a routerLink="/accounts/new" class="nav-link btn-primary">
+          Add Account
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="main-content">
+    <router-outlet></router-outlet>
+  </main>
+
+  <footer class="app-footer">
+    <p>&copy; 2025 Bank Account Management System</p>
+  </footer>
+</div>
