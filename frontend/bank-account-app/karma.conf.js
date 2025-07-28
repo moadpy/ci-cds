@@ -1,17 +1,16 @@
-// Karma configuration file, see link for more information
+// Karma configuration file for Angular 20+
 // https://karma-runner.github.io/1.0/config/configuration-file.html
 
 module.exports = function (config) {
   config.set({
     basePath: '',
-    frameworks: ['jasmine', '@angular-devkit/build-angular'],
+    frameworks: ['jasmine'],
     plugins: [
       require('karma-jasmine'),
       require('karma-chrome-launcher'),
       require('karma-jasmine-html-reporter'),
       require('karma-coverage'),
-      require('karma-junit-reporter'),
-      require('@angular-devkit/build-angular/plugins/karma')
+      require('karma-junit-reporter')
     ],
     client: {
       jasmine: {
@@ -68,6 +67,12 @@ module.exports = function (config) {
         ]
       }
     },
-    restartOnFileChange: true
+    restartOnFileChange: true,
+    port: 9876,
+    colors: true,
+    logLevel: config.LOG_INFO,
+    autoWatch: false,
+    singleRun: true,
+    concurrency: Infinity
   });
 };
