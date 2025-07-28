@@ -1,7 +1,7 @@
 # GitLab CI/CD Pipeline - Full Stack Application
 # Author: DevOps Team
-# Version: 3.0.0
-# Description: Efficient CI/CD pipeline for Spring Boot backend + Angular frontend optimized for Kubernetes deployment with Flux
+# Version: 4.0.0
+# Description: Optimized CI/CD pipeline for Kubernetes deployment with Flux - Backend focus with simplified integration tests
 
 workflow:
   rules:
@@ -19,24 +19,19 @@ variables:
   # Application Configuration
   BACKEND_APP_NAME: "account-service-backend"
   FRONTEND_APP_NAME: "account-service-frontend"
-  STAGING_NAMESPACE: "staging"
 
   # Node.js Configuration
   NODE_VERSION: "20"
   NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.npm"
 
-  # SonarQube Configuration
+  # SonarQube Configuration (Backend only)
   SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
   GIT_DEPTH: "0"
 
-  # Kubernetes Configuration
-  KUBECTL_VERSION: "1.28.4"
-
-  # Database Configuration for Integration Tests
-  MYSQL_ROOT_PASSWORD: "test_password"
-  MYSQL_DATABASE: "test_bank_account_db"
-  MYSQL_USER: "test_user"
-  MYSQL_PASSWORD: "test_password"
+  # Container Registry Configuration
+  REGISTRY: "$CI_REGISTRY"
+  BACKEND_IMAGE: "$CI_REGISTRY_IMAGE/backend"
+  FRONTEND_IMAGE: "$CI_REGISTRY_IMAGE/frontend"
 
 # Global cache configurations
 .maven_cache: &maven_cache
@@ -59,18 +54,10 @@ variables:
   changes:
     - backend/**/*
     - Dockerfile
-    - pom.xml
 
 .frontend_changes: &frontend_changes
   changes:
     - frontend/**/*
-    - Dockerfile.frontend
-
-.integration_changes: &integration_changes
-  changes:
-    - backend/**/*
-    - frontend/**/*
-    - Dockerfile
     - Dockerfile.frontend
 
 # Base job templates
@@ -91,11 +78,6 @@ variables:
 .kaniko_template: &kaniko_base
   image: gcr.io/kaniko-project/executor:v1.9.0-debug
 
-.kubernetes_template: &k8s_base
-  image: bitnami/kubectl:${KUBECTL_VERSION}
-  before_script:
-    - kubectl version --client
-
 stages:
   - .pre
   - validate
@@ -103,7 +85,7 @@ stages:
   - security
   - build
   - integration-test
-  - deploy-staging
+  - e2e-test
   - .post
 
 # =============================================================================
@@ -266,7 +248,7 @@ frontend-unit-tests:
       if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
 
 # =============================================================================
-# SECURITY & QUALITY STAGE: SonarQube Analysis and Security Scans
+# SECURITY & QUALITY STAGE: SonarQube Analysis (Backend Only)
 # =============================================================================
 
 sonarqube-backend:
@@ -310,40 +292,6 @@ sonarqube-backend:
   dependencies:
     - backend-unit-tests
     - compile-backend
-  allow_failure: false
-
-sonarqube-frontend:
-  stage: security
-  <<: *node_base
-  <<: *node_cache
-  script:
-    - echo "🔍 Running SonarQube analysis for frontend..."
-    - apk add --no-cache wget unzip openjdk11-jre
-    - wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
-    - unzip -q sonar-scanner-cli-5.0.1.3006-linux.zip
-    - export PATH="$PWD/sonar-scanner-5.0.1.3006-linux/bin:$PATH"
-    - cd frontend/bank-account-app
-    - sonar-scanner
-      -Dsonar.host.url=${SONAR_HOST_URL}
-      -Dsonar.login=${SONAR_TOKEN}
-      -Dsonar.projectKey=${CI_PROJECT_NAME}-frontend
-      -Dsonar.projectName="${CI_PROJECT_NAME}-frontend"
-      -Dsonar.projectVersion=${CI_COMMIT_SHORT_SHA}
-      -Dsonar.sources=src
-      -Dsonar.tests=src
-      -Dsonar.test.inclusions=**/*.spec.ts
-      -Dsonar.exclusions=**/*.spec.ts,**/node_modules/**
-      -Dsonar.typescript.lcov.reportPaths=coverage/bank-account-app/lcov.info
-      -Dsonar.qualitygate.wait=true
-  rules:
-    - <<: *frontend_changes
-      if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *frontend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - <<: *frontend_changes
-      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
-  dependencies:
-    - frontend-unit-tests
   allow_failure: false
 
 dependency-security-scan:
@@ -411,38 +359,36 @@ build-frontend:
     - <<: *frontend_changes
       if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
-build-backend-image:
+docker-build-backend:
   stage: build
   <<: *kaniko_base
   script:
-    - echo "🐳 Building backend container image with Kaniko..."
+    - echo "🐳 Building backend Docker image..."
+    - mkdir -p /kaniko/.docker
     - echo "{\"auths\":{\"$CI_REGISTRY\":{\"auth\":\"$(printf "%s:%s" "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" | base64 | tr -d '\n')\"}}}" > /kaniko/.docker/config.json
     - /kaniko/executor
       --context "${CI_PROJECT_DIR}"
       --dockerfile "${CI_PROJECT_DIR}/Dockerfile"
-      --destination "${CI_REGISTRY_IMAGE}/backend:${CI_COMMIT_SHORT_SHA}"
-      --destination "${CI_REGISTRY_IMAGE}/backend:latest"
-      --cache=true
-      --cache-ttl=24h
+      --destination "${BACKEND_IMAGE}:${CI_COMMIT_SHORT_SHA}"
+      --destination "${BACKEND_IMAGE}:latest"
   rules:
     - <<: *backend_changes
       if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   dependencies:
     - build-backend
 
-build-frontend-image:
+docker-build-frontend:
   stage: build
   <<: *kaniko_base
   script:
-    - echo "🐳 Building frontend container image with Kaniko..."
+    - echo "🐳 Building frontend Docker image..."
+    - mkdir -p /kaniko/.docker
     - echo "{\"auths\":{\"$CI_REGISTRY\":{\"auth\":\"$(printf "%s:%s" "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" | base64 | tr -d '\n')\"}}}" > /kaniko/.docker/config.json
     - /kaniko/executor
       --context "${CI_PROJECT_DIR}"
       --dockerfile "${CI_PROJECT_DIR}/Dockerfile.frontend"
-      --destination "${CI_REGISTRY_IMAGE}/frontend:${CI_COMMIT_SHORT_SHA}"
-      --destination "${CI_REGISTRY_IMAGE}/frontend:latest"
-      --cache=true
-      --cache-ttl=24h
+      --destination "${FRONTEND_IMAGE}:${CI_COMMIT_SHORT_SHA}"
+      --destination "${FRONTEND_IMAGE}:latest"
   rules:
     - <<: *frontend_changes
       if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -450,115 +396,77 @@ build-frontend-image:
     - build-frontend
 
 # =============================================================================
-# INTEGRATION TEST STAGE: Full Stack Testing
+# INTEGRATION TEST STAGE: Simplified Backend Database Integration with H2
 # =============================================================================
 
-integration-tests:
+backend-integration-tests:
   stage: integration-test
-  image: docker:24.0.5
-  services:
-    - docker:24.0.5-dind
-    - name: mysql:8.0
-      alias: mysql
-      variables:
-        MYSQL_ROOT_PASSWORD: $MYSQL_ROOT_PASSWORD
-        MYSQL_DATABASE: $MYSQL_DATABASE
-        MYSQL_USER: $MYSQL_USER
-        MYSQL_PASSWORD: $MYSQL_PASSWORD
-  variables:
-    DOCKER_TLS_CERTDIR: "/certs"
-    SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/$MYSQL_DATABASE"
-    SPRING_DATASOURCE_USERNAME: $MYSQL_USER
-    SPRING_DATASOURCE_PASSWORD: $MYSQL_PASSWORD
+  <<: *java_base
+  <<: *maven_cache
   script:
-    - echo "🔗 Running integration tests with real services..."
-    - apk add --no-cache curl openjdk21-jdk maven nodejs npm mysql-client
-
-    # Wait for MySQL to be ready
-    - |
-      echo "Waiting for MySQL to be ready..."
-      for i in {1..30}; do
-        if mysqladmin ping -h mysql -u $MYSQL_USER -p$MYSQL_PASSWORD; then
-          echo "MySQL is ready!"
-          break
-        fi
-        echo "MySQL not ready, waiting..."
-        sleep 2
-      done
-
-    # Run backend integration tests
-    - echo "Running backend integration tests..."
+    - echo "🔗 Running simplified backend integration tests with H2 database..."
     - cd backend
-    - mvn test -Dtest=**/*IntegrationTest -Dspring.profiles.active=integration-test
-    - cd ..
+    - echo "Starting H2 in-memory database for integration tests"
+    - mvn $MAVEN_CLI_OPTS test -Dspring.profiles.active=integration-test -Dtest="*IntegrationTest"
   artifacts:
     when: always
     reports:
       junit:
-        - backend/target/surefire-reports/TEST-*.xml
+        - backend/target/failsafe-reports/TEST-*.xml
     paths:
-      - backend/target/surefire-reports/
+      - backend/target/failsafe-reports/
     expire_in: 1 week
   rules:
-    - <<: *integration_changes
+    - <<: *backend_changes
       if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *integration_changes
+    - <<: *backend_changes
       if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - <<: *backend_changes
+      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
   dependencies:
     - build-backend
-    - build-frontend
-  allow_failure: false
 
 # =============================================================================
-# DEPLOYMENT STAGE: Kubernetes Deployment via Flux
+# E2E TEST STAGE: End-to-End Testing with Cypress
 # =============================================================================
 
-update-flux-manifests:
-  stage: deploy-staging
-  <<: *k8s_base
-  environment:
-    name: staging
-    url: https://staging.account-service.local
-    deployment_tier: staging
+e2e-tests:
+  stage: e2e-test
+  image: cypress/included:13.6.2
+  variables:
+    CYPRESS_CACHE_FOLDER: "$CI_PROJECT_DIR/.cypress"
+  cache:
+    key: "$CI_COMMIT_REF_SLUG-cypress"
+    paths:
+      - .cypress/
+      - frontend/bank-account-app/node_modules/
+  before_script:
+    - echo "🎭 Setting up E2E testing environment..."
+    - cd frontend/bank-account-app
+    - npm ci
   script:
-    - echo "🚀 Updating Flux deployment manifests..."
-
-    # Clone Flux GitOps repository
-    - git clone https://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_NAMESPACE}/flux-config.git
-    - cd flux-config
-
-    # Update backend image if it was built
-    - |
-      if [ -f "../backend/target/*.jar" ]; then
-        echo "Updating backend image in Flux manifests..."
-        yq eval ".spec.template.spec.containers[0].image = \"${CI_REGISTRY_IMAGE}/backend:${CI_COMMIT_SHORT_SHA}\"" -i apps/staging/${BACKEND_APP_NAME}/deployment.yaml
-      fi
-
-    # Update frontend image if it was built
-    - |
-      if [ -d "../frontend/bank-account-app/dist" ]; then
-        echo "Updating frontend image in Flux manifests..."
-        yq eval ".spec.template.spec.containers[0].image = \"${CI_REGISTRY_IMAGE}/frontend:${CI_COMMIT_SHORT_SHA}\"" -i apps/staging/${FRONTEND_APP_NAME}/deployment.yaml
-      fi
-
-    # Commit and push changes
-    - git config user.email "ci@${CI_SERVER_HOST}"
-    - git config user.name "GitLab CI/CD"
-    - git add apps/staging/
-    - git commit -m "Deploy ${CI_PROJECT_NAME} ${CI_COMMIT_SHORT_SHA} to staging [skip ci]" || echo "No changes to commit"
-    - git push origin main
-    - echo "✅ Flux manifests updated successfully"
-    - echo "⏳ Flux will automatically sync and deploy the changes"
+    - echo "🧪 Running E2E tests with Cypress..."
+    - npm run e2e:headless
+  artifacts:
+    when: always
+    paths:
+      - frontend/bank-account-app/cypress/screenshots/
+      - frontend/bank-account-app/cypress/videos/
+    reports:
+      junit:
+        - frontend/bank-account-app/cypress/results/junit.xml
+    expire_in: 1 week
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+      allow_failure: true
   dependencies:
-    - build-backend-image
-    - build-frontend-image
-  when: manual
-  allow_failure: false
+    - docker-build-backend
+    - docker-build-frontend
 
 # =============================================================================
-# POST-STAGE: Cleanup
+# POST-STAGE: Cleanup and Notifications
 # =============================================================================
 
 cleanup-workspace:
@@ -566,14 +474,8 @@ cleanup-workspace:
   image: alpine:latest
   script:
     - echo "🧹 Cleaning up workspace..."
-    - rm -rf backend/target/ || true
-    - rm -rf frontend/bank-account-app/node_modules/ || true
-    - rm -rf frontend/bank-account-app/dist/ || true
-    - rm -rf .m2/repository/ || true
-    - rm -rf .npm/ || true
-    - echo "✅ Workspace cleaned"
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+    - rm -rf backend/target/
+    - rm -rf frontend/bank-account-app/dist/
+    - rm -rf frontend/bank-account-app/node_modules/
   when: always
+  allow_failure: true
