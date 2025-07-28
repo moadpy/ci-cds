@@ -104,12 +104,13 @@ variables:
 .gitops_template: &gitops_base
   image: alpine/git:latest
   before_script:
-    - apk add --no-cache yq
+    - apk add --no-cache yq openssh-client
     - eval $(ssh-agent -s)
     - echo "$GITOPS_SSH_KEY" | tr -d '\r' | ssh-add -
     - mkdir -p ~/.ssh
     - chmod 700 ~/.ssh
     - ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
 
 stages:
   - .pre
@@ -379,7 +380,7 @@ build-frontend:
   <<: *node_cache
   script:
     - echo "📦 Building frontend application..."
-    - npm run build --prod
+    - npm run build
     - echo "✅ Frontend built successfully"
     - ls -la dist/
   artifacts:
