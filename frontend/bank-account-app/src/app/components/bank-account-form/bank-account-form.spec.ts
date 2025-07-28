@@ -1,6 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ReactiveFormsModule } from '@angular/forms';
 import { Router, ActivatedRoute } from '@angular/router';
+import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 
 import { BankAccountFormComponent } from './bank-account-form';
@@ -11,22 +12,18 @@ describe('BankAccountFormComponent', () => {
   let fixture: ComponentFixture<BankAccountFormComponent>;
   let mockBankAccountService: jasmine.SpyObj<BankAccountService>;
   let mockRouter: jasmine.SpyObj<Router>;
-  let mockActivatedRoute: any;
 
   beforeEach(async () => {
     const bankAccountServiceSpy = jasmine.createSpyObj('BankAccountService', ['createAccount', 'updateAccount', 'getAccountById']);
     const routerSpy = jasmine.createSpyObj('Router', ['navigate']);
-
-    mockActivatedRoute = {
-      paramMap: of(new Map([['id', '1']]))
-    };
 
     await TestBed.configureTestingModule({
       imports: [BankAccountFormComponent, ReactiveFormsModule],
       providers: [
         { provide: BankAccountService, useValue: bankAccountServiceSpy },
         { provide: Router, useValue: routerSpy },
-        { provide: ActivatedRoute, useValue: mockActivatedRoute }
+        { provide: ActivatedRoute, useValue: { paramMap: of(new Map()) } },
+        provideRouter([])
       ]
     })
     .compileComponents();

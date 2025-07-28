@@ -1,5 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { RouterTestingModule } from '@angular/router/testing';
+import { provideRouter } from '@angular/router';
+import { provideHttpClient } from '@angular/common/http';
 import { of } from 'rxjs';
 
 import { BankAccountListComponent } from './bank-account-list';
@@ -24,7 +26,9 @@ describe('BankAccountListComponent', () => {
     await TestBed.configureTestingModule({
       imports: [BankAccountListComponent, RouterTestingModule],
       providers: [
-        { provide: BankAccountService, useValue: bankAccountServiceSpy }
+        { provide: BankAccountService, useValue: bankAccountServiceSpy },
+        provideRouter([]),
+        provideHttpClient()
       ]
     })
     .compileComponents();
