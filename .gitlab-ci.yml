@@ -33,11 +33,13 @@ variables:
   BACKEND_IMAGE: "$CI_REGISTRY_IMAGE/backend"
   FRONTEND_IMAGE: "$CI_REGISTRY_IMAGE/frontend"
 
-  # GitOps Configuration
-  GITOPS_STAGING_REPO: "git@gitlab.com:your-org/gitops-staging.git"
-  GITOPS_PROD_REPO: "git@gitlab.com:your-org/gitops-production.git"
-  STAGING_CLUSTER_ENDPOINT: "${STAGING_K8S_ENDPOINT}"
-  PROD_CLUSTER_ENDPOINT: "${PROD_K8S_ENDPOINT}"
+  # GitOps Configuration - UPDATE THESE WITH YOUR ACTUAL REPOS
+  GITOPS_STAGING_REPO: "${GITOPS_STAGING_REPO_URL}"  # Set as CI/CD variable
+  GITOPS_PROD_REPO: "${GITOPS_PROD_REPO_URL}"        # Set as CI/CD variable
+
+  # Lab Environment URLs - UPDATE THESE FOR YOUR LAB
+  STAGING_BASE_URL: "${STAGING_URL}"     # Set as CI/CD variable (e.g., http://192.168.1.100:30080)
+  PRODUCTION_BASE_URL: "${PRODUCTION_URL}" # Set as CI/CD variable (e.g., http://192.168.1.100:30081)
 
 # Global cache configurations
 .maven_cache: &maven_cache
@@ -442,14 +444,16 @@ backend-integration-tests:
     - echo "🔗 Running simplified backend integration tests with H2 database..."
     - cd backend
     - echo "Starting H2 in-memory database for integration tests"
-    - mvn $MAVEN_CLI_OPTS test -Dspring.profiles.active=integration-test -Dtest="*IntegrationTest"
+    - mvn $MAVEN_CLI_OPTS verify -Dspring.profiles.active=integration-test
   artifacts:
     when: always
     reports:
       junit:
         - backend/target/failsafe-reports/TEST-*.xml
+        - backend/target/surefire-reports/TEST-*.xml
     paths:
       - backend/target/failsafe-reports/
+      - backend/target/surefire-reports/
     expire_in: 1 week
   rules:
     - <<: *backend_changes
@@ -500,7 +504,7 @@ deploy-staging:
       fi
   environment:
     name: staging
-    url: https://staging.your-domain.com
+    url: $STAGING_BASE_URL
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   dependencies:
@@ -516,7 +520,7 @@ e2e-tests:
   image: cypress/included:13.6.2
   variables:
     CYPRESS_CACHE_FOLDER: "$CI_PROJECT_DIR/.cypress"
-    CYPRESS_baseUrl: "https://staging.your-domain.com"
+    CYPRESS_baseUrl: "$STAGING_BASE_URL"
   cache:
     key: "$CI_COMMIT_REF_SLUG-cypress"
     paths:
@@ -525,9 +529,21 @@ e2e-tests:
   before_script:
     - echo "🎭 Setting up E2E testing environment..."
     - echo "Waiting for staging deployment to be ready..."
-    - sleep 60  # Give time for deployment to complete
+    - sleep 120  # Give more time for Kubernetes deployment to complete and be ready
     - cd frontend/bank-account-app
     - npm ci
+    - echo "Testing connectivity to staging environment: $STAGING_BASE_URL"
+    - apk add --no-cache curl
+    - |
+      # Wait for staging environment to be responsive
+      for i in {1..30}; do
+        if curl -f "$STAGING_BASE_URL/health" >/dev/null 2>&1; then
+          echo "✅ Staging environment is ready"
+          break
+        fi
+        echo "⏳ Waiting for staging environment... attempt $i/30"
+        sleep 10
+      done
   script:
     - echo "🧪 Running E2E tests against staging environment..."
     - npm run e2e:headless
@@ -587,7 +603,7 @@ deploy-production:
       fi
   environment:
     name: production
-    url: https://your-domain.com
+    url: $PRODUCTION_BASE_URL
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual

@@ -1,14 +1,12 @@
 package org.cicd.accountservice.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.cicd.accountservice.dto.BankAccountRequest;
-import org.cicd.accountservice.dto.BankAccountResponse;
-import org.cicd.accountservice.model.BankAccount;
-import org.cicd.accountservice.repository.BankAccountRepository;
+import org.cicd.accountservice.dto.BankAccountDTO;
+import org.cicd.accountservice.service.BankAccountService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureWebMvc;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
@@ -17,7 +15,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 
-import static org.hamcrest.Matchers.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -26,7 +23,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * This test verifies the complete flow from controller to database layer
  */
 @SpringBootTest
-@AutoConfigureWebMvc
+@AutoConfigureMockMvc
 @ActiveProfiles("integration-test")
 @Transactional
 public class BankAccountControllerIntegrationTest {
@@ -35,127 +32,68 @@ public class BankAccountControllerIntegrationTest {
     private MockMvc mockMvc;
 
     @Autowired
-    private BankAccountRepository bankAccountRepository;
+    private BankAccountService bankAccountService;
 
     @Autowired
     private ObjectMapper objectMapper;
 
+    private BankAccountDTO testAccountDTO;
+
     @BeforeEach
     void setUp() {
-        bankAccountRepository.deleteAll();
+        // Create a test account for integration tests
+        BankAccountDTO newAccount = new BankAccountDTO();
+        newAccount.setAccountNumber("INT123456");
+        newAccount.setAccountHolderName("Integration Test User");
+        newAccount.setBalance(new BigDecimal("1500.00"));
+        testAccountDTO = bankAccountService.createAccount(newAccount);
     }
 
     @Test
-    void shouldCreateBankAccount() throws Exception {
-        // Given
-        BankAccountRequest request = new BankAccountRequest();
-        request.setAccountHolderName("John Doe");
-        request.setAccountNumber("123456789");
-        request.setBalance(BigDecimal.valueOf(1000.00));
+    void shouldGetAllAccountsFromDatabase() throws Exception {
+        mockMvc.perform(get("/api/accounts"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[0].accountNumber").value("INT123456"))
+                .andExpect(jsonPath("$[0].accountHolderName").value("Integration Test User"));
+    }
 
-        // When & Then
-        mockMvc.perform(post("/api/bank-accounts")
+    @Test
+    void shouldCreateAccountInDatabase() throws Exception {
+        BankAccountDTO newAccount = new BankAccountDTO();
+        newAccount.setAccountNumber("INT789012");
+        newAccount.setAccountHolderName("New Integration User");
+        newAccount.setBalance(new BigDecimal("2000.00"));
+
+        mockMvc.perform(post("/api/accounts")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(request)))
+                .content(objectMapper.writeValueAsString(newAccount)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.accountHolderName", is("John Doe")))
-                .andExpect(jsonPath("$.accountNumber", is("123456789")))
-                .andExpect(jsonPath("$.balance", is(1000.00)))
-                .andExpect(jsonPath("$.id", notNullValue()));
-
-        // Verify database state
-        assert bankAccountRepository.count() == 1;
+                .andExpect(jsonPath("$.accountNumber").value("INT789012"))
+                .andExpect(jsonPath("$.accountHolderName").value("New Integration User"))
+                .andExpect(jsonPath("$.balance").value(2000.00));
     }
 
     @Test
-    void shouldGetAllBankAccounts() throws Exception {
-        // Given
-        BankAccount account1 = new BankAccount();
-        account1.setAccountHolderName("John Doe");
-        account1.setAccountNumber("123456789");
-        account1.setBalance(BigDecimal.valueOf(1000.00));
+    void shouldUpdateAccountInDatabase() throws Exception {
+        testAccountDTO.setAccountHolderName("Updated Integration User");
+        testAccountDTO.setBalance(new BigDecimal("2500.00"));
 
-        BankAccount account2 = new BankAccount();
-        account2.setAccountHolderName("Jane Smith");
-        account2.setAccountNumber("987654321");
-        account2.setBalance(BigDecimal.valueOf(2000.00));
-
-        bankAccountRepository.save(account1);
-        bankAccountRepository.save(account2);
-
-        // When & Then
-        mockMvc.perform(get("/api/bank-accounts"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(2)))
-                .andExpect(jsonPath("$[0].accountHolderName", is("John Doe")))
-                .andExpected(jsonPath("$[1].accountHolderName", is("Jane Smith")));
-    }
-
-    @Test
-    void shouldGetBankAccountById() throws Exception {
-        // Given
-        BankAccount account = new BankAccount();
-        account.setAccountHolderName("John Doe");
-        account.setAccountNumber("123456789");
-        account.setBalance(BigDecimal.valueOf(1000.00));
-
-        BankAccount savedAccount = bankAccountRepository.save(account);
-
-        // When & Then
-        mockMvc.perform(get("/api/bank-accounts/{id}", savedAccount.getId()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id", is(savedAccount.getId().intValue())))
-                .andExpect(jsonPath("$.accountHolderName", is("John Doe")))
-                .andExpect(jsonPath("$.accountNumber", is("123456789")))
-                .andExpect(jsonPath("$.balance", is(1000.00)));
-    }
-
-    @Test
-    void shouldUpdateBankAccount() throws Exception {
-        // Given
-        BankAccount account = new BankAccount();
-        account.setAccountHolderName("John Doe");
-        account.setAccountNumber("123456789");
-        account.setBalance(BigDecimal.valueOf(1000.00));
-
-        BankAccount savedAccount = bankAccountRepository.save(account);
-
-        BankAccountRequest updateRequest = new BankAccountRequest();
-        updateRequest.setAccountHolderName("John Updated");
-        updateRequest.setAccountNumber("123456789");
-        updateRequest.setBalance(BigDecimal.valueOf(1500.00));
-
-        // When & Then
-        mockMvc.perform(put("/api/bank-accounts/{id}", savedAccount.getId())
+        mockMvc.perform(put("/api/accounts/{id}", testAccountDTO.getId())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(updateRequest)))
+                .content(objectMapper.writeValueAsString(testAccountDTO)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.accountHolderName", is("John Updated")))
-                .andExpect(jsonPath("$.balance", is(1500.00)));
+                .andExpect(jsonPath("$.accountHolderName").value("Updated Integration User"))
+                .andExpect(jsonPath("$.balance").value(2500.00));
     }
 
     @Test
-    void shouldDeleteBankAccount() throws Exception {
-        // Given
-        BankAccount account = new BankAccount();
-        account.setAccountHolderName("John Doe");
-        account.setAccountNumber("123456789");
-        account.setBalance(BigDecimal.valueOf(1000.00));
-
-        BankAccount savedAccount = bankAccountRepository.save(account);
-
-        // When & Then
-        mockMvc.perform(delete("/api/bank-accounts/{id}", savedAccount.getId()))
+    void shouldDeleteAccountFromDatabase() throws Exception {
+        mockMvc.perform(delete("/api/accounts/{id}", testAccountDTO.getId()))
                 .andExpect(status().isNoContent());
 
-        // Verify deletion
-        assert bankAccountRepository.count() == 0;
-    }
-
-    @Test
-    void shouldReturnNotFoundForNonExistentAccount() throws Exception {
-        // When & Then
-        mockMvc.perform(get("/api/bank-accounts/{id}", 999L))
+        // Verify the account is deleted
+        mockMvc.perform(get("/api/accounts/{id}", testAccountDTO.getId()))
                 .andExpect(status().isNotFound());
     }
 }
