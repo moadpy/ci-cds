@@ -187,7 +187,8 @@ validate-frontend:
   <<: *node_cache
   script:
     - echo "🔍 Validating frontend project structure..."
-    - npm run ng -- version
+    - npm ci --cache .npm --prefer-offline
+    - npx ng version
     - npm audit --audit-level=high
   rules:
     - <<: *frontend_changes
