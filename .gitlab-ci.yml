@@ -529,14 +529,16 @@ e2e-tests:
   before_script:
     - echo "🎭 Setting up E2E testing environment..."
     - echo "Waiting for staging deployment to be ready..."
-    - sleep 120  # Give more time for Kubernetes deployment to complete and be ready
+    - sleep 120
     - cd frontend/bank-account-app
     - npm ci
-    - echo "Testing connectivity to staging environment: $STAGING_BASE_URL"
+    - echo "Testing connectivity to staging environment at $STAGING_BASE_URL"
     - apk add --no-cache curl
+  script:
+    - echo "🧪 Running E2E tests against staging environment..."
     - |
       # Wait for staging environment to be responsive
-      for i in {1..30}; do
+      for i in $(seq 1 30); do
         if curl -f "$STAGING_BASE_URL/health" >/dev/null 2>&1; then
           echo "✅ Staging environment is ready"
           break
@@ -544,8 +546,6 @@ e2e-tests:
         echo "⏳ Waiting for staging environment... attempt $i/30"
         sleep 10
       done
-  script:
-    - echo "🧪 Running E2E tests against staging environment..."
     - npm run e2e:headless
   artifacts:
     when: always
