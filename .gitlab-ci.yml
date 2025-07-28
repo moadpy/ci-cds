@@ -1,7 +1,7 @@
 # GitLab CI/CD Pipeline - Full Stack Application
 # Author: DevOps Team
-# Version: 4.0.0
-# Description: Optimized CI/CD pipeline for Kubernetes deployment with Flux - Backend focus with simplified integration tests
+# Version: 4.1.0
+# Description: Optimized CI/CD pipeline for Kubernetes deployment with Flux - Multi-environment with GitOps
 
 workflow:
   rules:
@@ -33,6 +33,12 @@ variables:
   BACKEND_IMAGE: "$CI_REGISTRY_IMAGE/backend"
   FRONTEND_IMAGE: "$CI_REGISTRY_IMAGE/frontend"
 
+  # GitOps Configuration
+  GITOPS_STAGING_REPO: "git@gitlab.com:your-org/gitops-staging.git"
+  GITOPS_PROD_REPO: "git@gitlab.com:your-org/gitops-production.git"
+  STAGING_CLUSTER_ENDPOINT: "${STAGING_K8S_ENDPOINT}"
+  PROD_CLUSTER_ENDPOINT: "${PROD_K8S_ENDPOINT}"
+
 # Global cache configurations
 .maven_cache: &maven_cache
   cache:
@@ -60,6 +66,21 @@ variables:
     - frontend/**/*
     - Dockerfile.frontend
 
+# Event-based rules
+.feature_branch_rules: &feature_branch_rules
+  rules:
+    - if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+    - if: $CI_COMMIT_BRANCH =~ /^hotfix\/.*/
+    - if: $CI_COMMIT_BRANCH =~ /^bugfix\/.*/
+
+.merge_request_rules: &merge_request_rules
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+.main_branch_rules: &main_branch_rules
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
 # Base job templates
 .java_template: &java_base
   image: openjdk:21-jdk-slim
@@ -78,6 +99,16 @@ variables:
 .kaniko_template: &kaniko_base
   image: gcr.io/kaniko-project/executor:v1.9.0-debug
 
+.gitops_template: &gitops_base
+  image: alpine/git:latest
+  before_script:
+    - apk add --no-cache yq
+    - eval $(ssh-agent -s)
+    - echo "$GITOPS_SSH_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
+
 stages:
   - .pre
   - validate
@@ -85,7 +116,9 @@ stages:
   - security
   - build
   - integration-test
+  - deploy-staging
   - e2e-test
+  - deploy-production
   - .post
 
 # =============================================================================
@@ -123,7 +156,7 @@ cache-frontend-dependencies:
       if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
 
 # =============================================================================
-# VALIDATION STAGE: Code Quality and Structure Validation
+# VALIDATION STAGE: Code Quality and Structure Validation (All Events)
 # =============================================================================
 
 validate-backend:
@@ -184,7 +217,7 @@ compile-backend:
       if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
 
 # =============================================================================
-# TEST STAGE: Unit Tests
+# TEST STAGE: Unit Tests (All Events)
 # =============================================================================
 
 backend-unit-tests:
@@ -248,7 +281,7 @@ frontend-unit-tests:
       if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
 
 # =============================================================================
-# SECURITY & QUALITY STAGE: SonarQube Analysis (Backend Only)
+# SECURITY & QUALITY STAGE: SonarQube Analysis (Merge Request + Main Branch Only)
 # =============================================================================
 
 sonarqube-backend:
@@ -287,8 +320,6 @@ sonarqube-backend:
       if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - <<: *backend_changes
       if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - <<: *backend_changes
-      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
   dependencies:
     - backend-unit-tests
     - compile-backend
@@ -315,7 +346,7 @@ dependency-security-scan:
   allow_failure: true
 
 # =============================================================================
-# BUILD STAGE: Application Packaging and Container Images
+# BUILD STAGE: Application Packaging and Container Images (Merge Request + Main Branch)
 # =============================================================================
 
 build-backend:
@@ -373,6 +404,8 @@ docker-build-backend:
       --destination "${BACKEND_IMAGE}:latest"
   rules:
     - <<: *backend_changes
+      if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - <<: *backend_changes
       if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   dependencies:
     - build-backend
@@ -391,12 +424,14 @@ docker-build-frontend:
       --destination "${FRONTEND_IMAGE}:latest"
   rules:
     - <<: *frontend_changes
+      if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - <<: *frontend_changes
       if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   dependencies:
     - build-frontend
 
 # =============================================================================
-# INTEGRATION TEST STAGE: Simplified Backend Database Integration with H2
+# INTEGRATION TEST STAGE: Simplified Backend Database Integration (Merge Request + Main Branch)
 # =============================================================================
 
 backend-integration-tests:
@@ -421,13 +456,59 @@ backend-integration-tests:
       if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - <<: *backend_changes
       if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - <<: *backend_changes
-      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
   dependencies:
     - build-backend
 
 # =============================================================================
-# E2E TEST STAGE: End-to-End Testing with Cypress
+# DEPLOY STAGING STAGE: Automatic Deployment to Staging (Main Branch Only)
+# =============================================================================
+
+deploy-staging:
+  stage: deploy-staging
+  <<: *gitops_base
+  script:
+    - echo "🚀 Deploying to staging environment via GitOps..."
+    - git clone $GITOPS_STAGING_REPO gitops-staging
+    - cd gitops-staging
+    - |
+      # Update backend image tag
+      if [ -n "$BACKEND_IMAGE" ]; then
+        yq eval ".spec.template.spec.containers[0].image = \"${BACKEND_IMAGE}:${CI_COMMIT_SHORT_SHA}\"" -i applications/backend/deployment.yaml
+        echo "Updated backend image to: ${BACKEND_IMAGE}:${CI_COMMIT_SHORT_SHA}"
+      fi
+    - |
+      # Update frontend image tag  
+      if [ -n "$FRONTEND_IMAGE" ]; then
+        yq eval ".spec.template.spec.containers[0].image = \"${FRONTEND_IMAGE}:${CI_COMMIT_SHORT_SHA}\"" -i applications/frontend/deployment.yaml
+        echo "Updated frontend image to: ${FRONTEND_IMAGE}:${CI_COMMIT_SHORT_SHA}"
+      fi
+    - |
+      # Commit and push changes
+      git config user.name "GitLab CI"
+      git config user.email "ci@gitlab.com"
+      git add .
+      if git diff --staged --quiet; then
+        echo "No changes to commit"
+      else
+        git commit -m "Deploy ${CI_PROJECT_NAME} ${CI_COMMIT_SHORT_SHA} to staging
+        
+        Source commit: ${CI_COMMIT_SHA}
+        Pipeline: ${CI_PIPELINE_URL}
+        Branch: ${CI_COMMIT_REF_NAME}"
+        git push origin main
+        echo "✅ Staging deployment triggered via GitOps"
+      fi
+  environment:
+    name: staging
+    url: https://staging.your-domain.com
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  dependencies:
+    - docker-build-backend
+    - docker-build-frontend
+
+# =============================================================================
+# E2E TEST STAGE: End-to-End Testing Against Staging (Main Branch Only, After Deployment)
 # =============================================================================
 
 e2e-tests:
@@ -435,6 +516,7 @@ e2e-tests:
   image: cypress/included:13.6.2
   variables:
     CYPRESS_CACHE_FOLDER: "$CI_PROJECT_DIR/.cypress"
+    CYPRESS_baseUrl: "https://staging.your-domain.com"
   cache:
     key: "$CI_COMMIT_REF_SLUG-cypress"
     paths:
@@ -442,10 +524,12 @@ e2e-tests:
       - frontend/bank-account-app/node_modules/
   before_script:
     - echo "🎭 Setting up E2E testing environment..."
+    - echo "Waiting for staging deployment to be ready..."
+    - sleep 60  # Give time for deployment to complete
     - cd frontend/bank-account-app
     - npm ci
   script:
-    - echo "🧪 Running E2E tests with Cypress..."
+    - echo "🧪 Running E2E tests against staging environment..."
     - npm run e2e:headless
   artifacts:
     when: always
@@ -458,12 +542,58 @@ e2e-tests:
     expire_in: 1 week
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-      when: manual
-      allow_failure: true
   dependencies:
-    - docker-build-backend
-    - docker-build-frontend
+    - deploy-staging
+
+# =============================================================================
+# DEPLOY PRODUCTION STAGE: Manual Deployment to Production (Main Branch Only)
+# =============================================================================
+
+deploy-production:
+  stage: deploy-production
+  <<: *gitops_base
+  script:
+    - echo "🚀 Deploying to production environment via GitOps..."
+    - git clone $GITOPS_PROD_REPO gitops-production
+    - cd gitops-production
+    - |
+      # Update backend image tag
+      if [ -n "$BACKEND_IMAGE" ]; then
+        yq eval ".spec.template.spec.containers[0].image = \"${BACKEND_IMAGE}:${CI_COMMIT_SHORT_SHA}\"" -i applications/backend/deployment.yaml
+        echo "Updated backend image to: ${BACKEND_IMAGE}:${CI_COMMIT_SHORT_SHA}"
+      fi
+    - |
+      # Update frontend image tag
+      if [ -n "$FRONTEND_IMAGE" ]; then
+        yq eval ".spec.template.spec.containers[0].image = \"${FRONTEND_IMAGE}:${CI_COMMIT_SHORT_SHA}\"" -i applications/frontend/deployment.yaml
+        echo "Updated frontend image to: ${FRONTEND_IMAGE}:${CI_COMMIT_SHORT_SHA}"
+      fi
+    - |
+      # Commit and push changes
+      git config user.name "GitLab CI"
+      git config user.email "ci@gitlab.com"
+      git add .
+      if git diff --staged --quiet; then
+        echo "No changes to commit"
+      else
+        git commit -m "Deploy ${CI_PROJECT_NAME} ${CI_COMMIT_SHORT_SHA} to production
+        
+        Source commit: ${CI_COMMIT_SHA}
+        Pipeline: ${CI_PIPELINE_URL}
+        Branch: ${CI_COMMIT_REF_NAME}
+        Approved by: ${GITLAB_USER_NAME}"
+        git push origin main
+        echo "✅ Production deployment triggered via GitOps"
+      fi
+  environment:
+    name: production
+    url: https://your-domain.com
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+      allow_failure: false
+  dependencies:
+    - e2e-tests
 
 # =============================================================================
 # POST-STAGE: Cleanup and Notifications
