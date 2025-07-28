@@ -261,6 +261,14 @@ frontend-unit-tests:
   stage: test
   <<: *node_base
   <<: *node_cache
+  before_script:
+    - node --version
+    - npm --version
+    - cd frontend/bank-account-app
+    - echo "Installing Chrome for testing..."
+    - apk add --no-cache chromium
+    - export CHROME_BIN=/usr/bin/chromium-browser
+    - export PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
   script:
     - echo "🧪 Running frontend unit tests..."
     - npm ci --cache .npm --prefer-offline
