@@ -4,7 +4,7 @@ import { Observable } from 'rxjs';
 import { BankAccount } from '../../models/bank-account.model';
 import { BankAccountService } from '../../services/bank-account.service';
 import { RouterModule } from '@angular/router';
-// d
+// de
 @Component({
   selector: 'app-bank-account-list',
   standalone: true,
