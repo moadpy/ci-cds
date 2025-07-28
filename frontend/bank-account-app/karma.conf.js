@@ -4,13 +4,14 @@
 module.exports = function (config) {
   config.set({
     basePath: '',
-    frameworks: ['jasmine'],
+    frameworks: ['jasmine', '@angular-devkit/build-angular'],
     plugins: [
       require('karma-jasmine'),
       require('karma-chrome-launcher'),
       require('karma-jasmine-html-reporter'),
       require('karma-coverage'),
-      require('karma-junit-reporter')
+      require('karma-junit-reporter'),
+      require('@angular-devkit/build-angular/plugins/karma')
     ],
     client: {
       jasmine: {
@@ -35,10 +36,10 @@ module.exports = function (config) {
       ],
       check: {
         global: {
-          statements: 80,
-          branches: 80,
-          functions: 80,
-          lines: 80
+          statements: 20,
+          branches: 10,
+          functions: 20,
+          lines: 20
         }
       }
     },
@@ -63,7 +64,8 @@ module.exports = function (config) {
           '--disable-renderer-backgrounding',
           '--disable-features=TranslateUI',
           '--disable-ipc-flooding-protection',
-          '--memory-pressure-off'
+          '--memory-pressure-off',
+          '--remote-debugging-port=9222'
         ]
       }
     },

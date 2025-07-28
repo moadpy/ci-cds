@@ -19,9 +19,8 @@ describe('BankAccountListComponent', () => {
   ];
 
   beforeEach(async () => {
-    const bankAccountServiceSpy = jasmine.createSpyObj('BankAccountService', ['loadAllAccounts', 'deleteAccount'], {
-      accounts$: of(mockAccounts)
-    });
+    const bankAccountServiceSpy = jasmine.createSpyObj('BankAccountService', ['getAllAccounts', 'deleteAccount']);
+    bankAccountServiceSpy.getAllAccounts.and.returnValue(of(mockAccounts));
 
     await TestBed.configureTestingModule({
       imports: [BankAccountListComponent, RouterTestingModule],
@@ -42,16 +41,15 @@ describe('BankAccountListComponent', () => {
     expect(component).toBeTruthy();
   });
 
+  it('should call getAllAccounts on init', () => {
+    fixture.detectChanges();
+    expect(mockBankAccountService.getAllAccounts).toHaveBeenCalled();
+  });
+
   it('should initialize with accounts from service', () => {
     fixture.detectChanges();
     component.accounts$.subscribe(accounts => {
       expect(accounts).toEqual(mockAccounts);
     });
-  });
-
-  it('should call loadAllAccounts on init', () => {
-    mockBankAccountService.loadAllAccounts.and.returnValue(of(mockAccounts));
-    fixture.detectChanges();
-    expect(mockBankAccountService.loadAllAccounts).toHaveBeenCalled();
   });
 });
