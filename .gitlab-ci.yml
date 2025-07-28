@@ -263,6 +263,7 @@ frontend-unit-tests:
   <<: *node_cache
   script:
     - echo "🧪 Running frontend unit tests..."
+    - npm ci --cache .npm --prefer-offline
     - npm run test -- --no-watch --no-progress --browsers=ChromeHeadlessCI --code-coverage
   coverage: '/Lines.*?(\d+(?:\.\d+)?)%/'
   artifacts:
