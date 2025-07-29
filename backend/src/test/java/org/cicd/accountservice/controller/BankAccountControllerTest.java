@@ -72,7 +72,7 @@ class BankAccountControllerTest {
         mockMvc.perform(post("/api/accounts")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(newAccount)))
-                .andExpect(status().isOk())
+                .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.accountNumber").value("11223"));
     }
 
