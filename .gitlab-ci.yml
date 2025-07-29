@@ -257,6 +257,35 @@ backend-unit-tests:
   dependencies:
     - compile-backend
 
+backend-integration-tests:
+  stage: test
+  <<: *java_base
+  <<: *maven_cache
+  script:
+    - echo "🔗 Running backend integration tests with H2 database..."
+    - cd backend
+    - echo "Starting H2 in-memory database for integration tests"
+    - mvn $MAVEN_CLI_OPTS verify -Dspring.profiles.active=integration-test
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - backend/target/failsafe-reports/TEST-*.xml
+        - backend/target/surefire-reports/TEST-*.xml
+    paths:
+      - backend/target/failsafe-reports/
+      - backend/target/surefire-reports/
+    expire_in: 1 week
+  rules:
+    - <<: *backend_changes
+      if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - <<: *backend_changes
+      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - <<: *backend_changes
+      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+  dependencies:
+    - compile-backend
+
 frontend-unit-tests:
   stage: test
   <<: *node_base
@@ -426,35 +455,11 @@ docker-build-frontend:
     - build-frontend
 
 # =============================================================================
-# INTEGRATION TEST STAGE: Simplified Backend Database Integration (Merge Request + Main Branch)
+# INTEGRATION TEST STAGE: Container-based Integration Tests (if needed)
 # =============================================================================
 
-backend-integration-tests:
-  stage: integration-test
-  <<: *java_base
-  <<: *maven_cache
-  script:
-    - echo "🔗 Running simplified backend integration tests with H2 database..."
-    - cd backend
-    - echo "Starting H2 in-memory database for integration tests"
-    - mvn $MAVEN_CLI_OPTS verify -Dspring.profiles.active=integration-test
-  artifacts:
-    when: always
-    reports:
-      junit:
-        - backend/target/failsafe-reports/TEST-*.xml
-        - backend/target/surefire-reports/TEST-*.xml
-    paths:
-      - backend/target/failsafe-reports/
-      - backend/target/surefire-reports/
-    expire_in: 1 week
-  rules:
-    - <<: *backend_changes
-      if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *backend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-  dependencies:
-    - build-backend
+# Note: This stage is reserved for tests that require actual containers/services
+# For H2-based tests, use the test stage instead
 
 # =============================================================================
 # DEPLOY STAGING STAGE: Automatic Deployment to Staging (Main Branch Only)
