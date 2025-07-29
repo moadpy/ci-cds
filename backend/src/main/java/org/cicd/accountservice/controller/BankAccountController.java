@@ -30,8 +30,9 @@ public class BankAccountController {
     }
 
     @PostMapping
-    public BankAccountDTO createAccount(@RequestBody BankAccountDTO bankAccountDTO) {
-        return bankAccountService.createAccount(bankAccountDTO);
+    public ResponseEntity<BankAccountDTO> createAccount(@RequestBody BankAccountDTO bankAccountDTO) {
+        BankAccountDTO createdAccount = bankAccountService.createAccount(bankAccountDTO);
+        return ResponseEntity.status(201).body(createdAccount);
     }
 
     @PutMapping("/{id}")
