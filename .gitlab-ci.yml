@@ -321,21 +321,14 @@ sonarqube-backend:
       - .sonar/cache
   script:
     - echo "🔍 Running SonarQube analysis for backend..."
-    - apk add --no-cache wget unzip
-    - wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
-    - unzip sonar-scanner-cli-5.0.1.3006-linux.zip
-    - export PATH="$PWD/sonar-scanner-5.0.1.3006-linux/bin:$PATH"
     - cd backend
-    - sonar-scanner
+    # Use Maven SonarQube plugin instead of standalone scanner
+    - mvn $MAVEN_CLI_OPTS sonar:sonar
       -Dsonar.host.url=${SONAR_HOST_URL}
       -Dsonar.login=${SONAR_TOKEN}
       -Dsonar.projectKey=${CI_PROJECT_NAME}-backend
       -Dsonar.projectName="${CI_PROJECT_NAME}-backend"
       -Dsonar.projectVersion=${CI_COMMIT_SHORT_SHA}
-      -Dsonar.sources=src/main/java
-      -Dsonar.tests=src/test/java
-      -Dsonar.java.binaries=target/classes
-      -Dsonar.java.test.binaries=target/test-classes
       -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
       -Dsonar.junit.reportPaths=target/surefire-reports
       -Dsonar.qualitygate.wait=true
