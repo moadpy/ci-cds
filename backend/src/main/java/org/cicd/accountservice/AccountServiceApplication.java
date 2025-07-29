@@ -1,5 +1,5 @@
 package org.cicd.accountservice;
-
+// CICD Account Service Applicati
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
