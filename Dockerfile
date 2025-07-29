@@ -1,24 +1,23 @@
 # Multi-stage Dockerfile for Backend Service
 # Stage 1: Build stage (used in CI/CD pipeline)
-FROM openjdk:21-jdk-slim as builder
+FROM eclipse-temurin:21-jdk-alpine as builder
 WORKDIR /app
 COPY backend/target/*.jar app.jar
 RUN java -Djarmode=layertools -jar app.jar extract
 
 # Stage 2: Runtime stage
-FROM openjdk:21-jre-slim
+FROM eclipse-temurin:21-jre-alpine
 
 # Create non-root user for security
-RUN groupadd -r appgroup && useradd -r -g appgroup appuser
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 # Install security updates and minimal packages
-RUN apt-get update && \
-    apt-get upgrade -y && \
-    apt-get install -y --no-install-recommends \
+RUN apk update && \
+    apk upgrade && \
+    apk add --no-cache \
     curl \
     mysql-client \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    && rm -rf /var/cache/apk/*
 
 WORKDIR /app
 

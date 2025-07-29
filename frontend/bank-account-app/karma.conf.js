@@ -1,4 +1,4 @@
-// Karma configuration file for Angular 20+
+// Karma configuration file, see link for more information
 // https://karma-runner.github.io/1.0/config/configuration-file.html
 
 module.exports = function (config) {
@@ -36,10 +36,10 @@ module.exports = function (config) {
       ],
       check: {
         global: {
-          statements: 20,
-          branches: 10,
-          functions: 20,
-          lines: 20
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80
         }
       }
     },

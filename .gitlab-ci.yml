@@ -85,9 +85,9 @@ variables:
 
 # Base job templates
 .java_template: &java_base
-  image: openjdk:21-jdk-slim
+  image: eclipse-temurin:21-jdk-alpine
   before_script:
-    - apt-get update -qq && apt-get install -y -qq maven git curl
+    - apk add --no-cache maven git curl
     - java --version
     - mvn --version
 

@@ -8,9 +8,10 @@
     <!-- Suppress H2 database vulnerabilities (only used for testing) -->
     <suppress>
         <notes><![CDATA[
-        H2 database is only used for testing purposes and not in production environment
+        H2 database is only used for testing purposes and not in production environment. All vulnerabilities are suppressed for this test-only dependency.
         ]]></notes>
         <packageUrl regex="true">^pkg:maven/com\.h2database/h2@.*$</packageUrl>
+        <vulnerabilityName regex="true">.*</vulnerabilityName>
     </suppress>
 
     <!-- Example: Suppress specific CVE if it doesn't apply to your usage -->

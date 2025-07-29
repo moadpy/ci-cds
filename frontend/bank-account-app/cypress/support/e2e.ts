@@ -17,17 +17,3 @@
 import './commands'
 
 // Alternatively you can use CommonJS syntax:
-// require('./commands')
-
-// Global configuration
-beforeEach(() => {
-  // Clean up test data before each test
-  cy.cleanupTestData()
-})
-
-// Handle uncaught exceptions
-Cypress.on('uncaught:exception', (err, runnable) => {
-  // returning false here prevents Cypress from
-  // failing the test on uncaught exceptions
-  return false
-})

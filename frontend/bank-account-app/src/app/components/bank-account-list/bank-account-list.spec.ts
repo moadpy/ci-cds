@@ -43,7 +43,7 @@ describe('BankAccountListComponent', () => {
 
   it('should call getAllAccounts on init', () => {
     fixture.detectChanges();
-    expect(mockBankAccountService.getAllAccounts).toHaveBeenCalled();
+    expect(mockBankAccountService.loadAllAccounts).toHaveBeenCalled();
   });
 
   it('should initialize with accounts from service', () => {

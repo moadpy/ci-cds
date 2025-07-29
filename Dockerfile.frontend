@@ -7,14 +7,14 @@ WORKDIR /app
 # Copy package files
 COPY frontend/bank-account-app/package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install ALL dependencies (including devDependencies for Angular CLI)
+RUN npm ci
 
 # Copy source code
 COPY frontend/bank-account-app/ ./
 
 # Build the application
-RUN npm run build --prod
+RUN npm run build
 
 # Stage 2: Serve with Nginx
 FROM nginx:alpine
