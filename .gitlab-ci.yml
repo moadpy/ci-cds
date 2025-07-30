@@ -45,6 +45,7 @@ variables:
     - apt-get update -qq && apt-get install -y -qq maven git curl
     - java --version
     - mvn --version
+    - cd backend  # Change to backend directory where pom.xml is located
 
 .node_template: &node_base
   image: node:${NODE_VERSION}-alpine
@@ -143,9 +144,9 @@ validate-and-build-backend:
     - ls -la target/
   artifacts:
     paths:
-      - target/*.jar
-      - target/classes/
-      - target/test-classes/
+      - backend/target/*.jar
+      - backend/target/classes/
+      - backend/target/test-classes/
     expire_in: 2 hours
   rules:
     - <<: *backend_changes
@@ -193,13 +194,13 @@ backend-unit-tests:
     when: always
     reports:
       junit:
-        - target/surefire-reports/TEST-*.xml
+        - backend/target/surefire-reports/TEST-*.xml
       coverage_report:
         coverage_format: jacoco
-        path: target/site/jacoco/jacoco.xml
+        path: backend/target/site/jacoco/jacoco.xml
     paths:
-      - target/surefire-reports/
-      - target/site/jacoco/
+      - backend/target/surefire-reports/
+      - backend/target/site/jacoco/
     expire_in: 1 week
   rules:
     - <<: *backend_changes
@@ -221,9 +222,9 @@ backend-integration-tests:
     when: always
     reports:
       junit:
-        - target/failsafe-reports/TEST-*.xml
+        - backend/target/failsafe-reports/TEST-*.xml
     paths:
-      - target/failsafe-reports/
+      - backend/target/failsafe-reports/
     expire_in: 1 week
   rules:
     - <<: *backend_changes
