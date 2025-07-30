@@ -253,7 +253,8 @@ sonarqube-backend:
   script:
     - echo "🔍 Running SonarQube analysis..."
     - echo "Using existing SonarQube instance on cluster..."
-    - echo "Java version: $(java --version)"
+    - apt-get update -qq && apt-get install -y -qq wget unzip
+    - java -version
     - wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
     - unzip -q sonar-scanner-cli-5.0.1.3006-linux.zip
     - export PATH="$PWD/sonar-scanner-5.0.1.3006-linux/bin:$PATH"
