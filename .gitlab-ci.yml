@@ -149,10 +149,9 @@ validate-and-build-backend:
       - backend/target/test-classes/
     expire_in: 2 hours
   rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH  # Always run on main
     - <<: *backend_changes
       if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *backend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - <<: *backend_changes
       if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
 
@@ -170,10 +169,9 @@ validate-and-build-frontend:
       - frontend/bank-account-app/dist/
     expire_in: 2 hours
   rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH  # Always run on main
     - <<: *frontend_changes
       if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *frontend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - <<: *frontend_changes
       if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
 
@@ -203,10 +201,9 @@ backend-unit-tests:
       - backend/target/site/jacoco/
     expire_in: 1 week
   rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH  # Always run on main
     - <<: *backend_changes
       if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *backend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - <<: *backend_changes
       if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
   needs:
@@ -227,17 +224,16 @@ backend-integration-tests:
       - backend/target/failsafe-reports/
     expire_in: 1 week
   rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH  # Always run on main
     - <<: *backend_changes
       if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *backend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   needs:
     - validate-and-build-backend
 
 # SonarQube using your EXACT working configuration with Java 21 fix
 sonarqube-backend:
   stage: test-security
-  image: openjdk:21-jdk-slim  # Explicitly use Java 21
+  <<: *java_base
   <<: *maven_cache
   variables:
     SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
@@ -246,10 +242,6 @@ sonarqube-backend:
     key: "${CI_JOB_NAME}"
     paths:
       - .sonar/cache
-  before_script:
-    - apt-get update -qq && apt-get install -y -qq maven git curl wget unzip
-    - java --version  # Verify Java version
-    - cd backend  # Change to backend directory where pom.xml is located
   script:
     - echo "🔍 Running SonarQube analysis..."
     - echo "Using existing SonarQube instance on cluster..."
@@ -268,7 +260,7 @@ sonarqube-backend:
       if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
   needs:
     - backend-unit-tests
-  allow_failure: true
+  allow_failure: false
 
 # Trivy filesystem scan - using your exact working configuration
 trivy-filesystem-scan:
@@ -310,10 +302,9 @@ package-backend:
       - backend/target/*original.jar
     expire_in: 1 hour
   rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH  # Always run on main
     - <<: *backend_changes
       if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *backend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   needs:
     - validate-and-build-backend
 
@@ -342,10 +333,9 @@ docker-build-backend:
       - backend-image.tar
     expire_in: 1 hour
   rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH  # Always run on main
     - <<: *backend_changes
       if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *backend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 docker-build-frontend:
   stage: package
@@ -371,10 +361,9 @@ docker-build-frontend:
       - frontend-image.tar
     expire_in: 1 hour
   rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH  # Always run on main
     - <<: *frontend_changes
       if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *frontend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 # Image scanning using your exact working configuration
 trivy-scan-backend-image:
