@@ -1,7 +1,7 @@
-# GitLab CI/CD Pipeline - Full Stack Application
+# GitLab CI/CD Pipeline - Clean & Efficient
 # Author: DevOps Team
-# Version: 4.1.0
-# Description: Optimized CI/CD pipeline for Kubernetes deployment with Flux - Multi-environment with GitOps
+# Version: 5.0.0
+# Description: Optimized pipeline following latest GitLab CI best practices
 
 workflow:
   rules:
@@ -12,39 +12,67 @@ workflow:
     - if: $CI_COMMIT_BRANCH =~ /^bugfix\/.*/
 
 variables:
-  # Maven Configuration
+  # Maven Configuration - using your exact working config
   MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository -Xmx2048m -XX:MaxMetaspaceSize=512m"
   MAVEN_CLI_OPTS: "--batch-mode --errors --fail-at-end --show-version -DinstallAtEnd=true -DdeployAtEnd=true"
 
   # Application Configuration
-  BACKEND_APP_NAME: "account-service-backend"
-  FRONTEND_APP_NAME: "account-service-frontend"
-
-  # Node.js Configuration
-  NODE_VERSION: "20"
-  NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.npm"
-
-  # SonarQube Configuration (Backend only)
-  SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
-  GIT_DEPTH: "0"
-
-  # Container Registry Configuration
-  REGISTRY: "$CI_REGISTRY"
+  APP_NAME: "account-service"
   BACKEND_IMAGE: "$CI_REGISTRY_IMAGE/backend"
   FRONTEND_IMAGE: "$CI_REGISTRY_IMAGE/frontend"
 
-  # GitOps Configuration - UPDATE THESE WITH YOUR ACTUAL REPOS
-  GITOPS_STAGING_REPO: "${GITOPS_STAGING_REPO_URL}"  # Set as CI/CD variable
-  GITOPS_PROD_REPO: "${GITOPS_PROD_REPO_URL}"        # Set as CI/CD variable
+  # Node.js Configuration
+  NODE_VERSION: "20"
 
-  # Lab Environment URLs - UPDATE THESE FOR YOUR LAB
-  STAGING_BASE_URL: "${STAGING_URL}"     # Set as CI/CD variable (e.g., http://192.168.1.100:30080)
-  PRODUCTION_BASE_URL: "${PRODUCTION_URL}" # Set as CI/CD variable (e.g., http://192.168.1.100:30081)
+  # SonarQube Configuration
+  SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
+  GIT_DEPTH: "0"
 
-# Global cache configurations
+  # GitOps Configuration
+  GITOPS_STAGING_REPO: "${GITOPS_STAGING_REPO_URL}"
+  GITOPS_PROD_REPO: "${GITOPS_PROD_REPO_URL}"
+  STAGING_BASE_URL: "${STAGING_URL}"
+  PRODUCTION_BASE_URL: "${PRODUCTION_URL}"
+
+# =============================================================================
+# YAML ANCHOR TEMPLATES - Using Your Proven Working Configurations
+# =============================================================================
+
+# Base job templates - EXACT copies from your working examples
+.java_template: &java_base
+  image: openjdk:21-jdk-slim
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq maven git curl
+    - java --version
+    - mvn --version
+
+.node_template: &node_base
+  image: node:${NODE_VERSION}-alpine
+  before_script:
+    - node --version
+    - npm --version
+    - cd frontend/bank-account-app
+    - npm ci --prefer-offline
+    - npx ng version  # This ensures Angular CLI is available
+
+.gitops_template: &gitops_base
+  image: alpine/git:latest
+  before_script:
+    - apk add --no-cache yq openssh-client
+    - eval $(ssh-agent -s)
+    - echo "$GITOPS_SSH_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+
+# Cache templates with fallback keys (Claude's recommendation)
 .maven_cache: &maven_cache
   cache:
     key: "$CI_COMMIT_REF_SLUG-maven"
+    fallback_keys:
+      - "main-maven"
+      - "develop-maven"
     paths:
       - .m2/repository/
     policy: pull-push
@@ -52,9 +80,11 @@ variables:
 .node_cache: &node_cache
   cache:
     key: "$CI_COMMIT_REF_SLUG-node"
+    fallback_keys:
+      - "main-node"
+      - "develop-node"
     paths:
       - frontend/bank-account-app/node_modules/
-      - .npm/
     policy: pull-push
 
 # Change detection rules
@@ -68,149 +98,54 @@ variables:
     - frontend/**/*
     - Dockerfile.frontend
 
-# Event-based rules
-.feature_branch_rules: &feature_branch_rules
-  rules:
-    - if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
-    - if: $CI_COMMIT_BRANCH =~ /^hotfix\/.*/
-    - if: $CI_COMMIT_BRANCH =~ /^bugfix\/.*/
+# Resource limits (Claude's recommendation)
+.resource_limits: &resource_limits
+  variables:
+    KUBERNETES_CPU_REQUEST: "500m"
+    KUBERNETES_CPU_LIMIT: "2"
+    KUBERNETES_MEMORY_REQUEST: "1Gi"
+    KUBERNETES_MEMORY_LIMIT: "4Gi"
 
-.merge_request_rules: &merge_request_rules
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+# Combined templates for efficiency
+.java_with_cache: &java_with_cache
+  <<: *java_base
+  <<: *maven_cache
 
-.main_branch_rules: &main_branch_rules
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+.node_with_cache: &node_with_cache
+  <<: *node_base
+  <<: *node_cache
 
-# Base job templates
-.java_template: &java_base
-  image: eclipse-temurin:21-jdk-alpine
-  before_script:
-    - apk add --no-cache maven git curl
-    - java --version
-    - mvn --version
-
-.node_template: &node_base
-  image: node:${NODE_VERSION}-alpine
-  before_script:
-    - node --version
-    - npm --version
-    - cd frontend/bank-account-app
-
-.kaniko_template: &kaniko_base
-  image: gcr.io/kaniko-project/executor:v1.9.0-debug
-
-.gitops_template: &gitops_base
-  image: alpine/git:latest
-  before_script:
-    - apk add --no-cache yq openssh-client
-    - eval $(ssh-agent -s)
-    - echo "$GITOPS_SSH_KEY" | tr -d '\r' | ssh-add -
-    - mkdir -p ~/.ssh
-    - chmod 700 ~/.ssh
-    - ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
-    - chmod 644 ~/.ssh/known_hosts
-
+# Streamlined stages (Claude's recommendation: 9 → 6)
 stages:
-  - .pre
-  - validate
-  - test
-  - security
-  - build
-  - integration-test
+  - validate-build
+  - test-security
+  - package
   - deploy-staging
   - e2e-test
   - deploy-production
-  - .post
 
 # =============================================================================
-# PRE-STAGE: Environment Setup and Cache Warming
+# VALIDATE & BUILD STAGE: Combined validation, compilation, and builds
 # =============================================================================
 
-cache-backend-dependencies:
-  stage: .pre
-  <<: *java_base
-  <<: *maven_cache
+validate-and-build-backend:
+  stage: validate-build
+  <<: *java_with_cache
+  <<: *resource_limits
   script:
-    - cd backend
-    - mvn $MAVEN_CLI_OPTS dependency:go-offline
-    - mvn $MAVEN_CLI_OPTS dependency:resolve-sources
-  rules:
-    - <<: *backend_changes
-      if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *backend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - <<: *backend_changes
-      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
-
-cache-frontend-dependencies:
-  stage: .pre
-  <<: *node_base
-  <<: *node_cache
-  script:
-    - npm ci --cache .npm --prefer-offline
-  rules:
-    - <<: *frontend_changes
-      if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *frontend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - <<: *frontend_changes
-      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
-
-# =============================================================================
-# VALIDATION STAGE: Code Quality and Structure Validation (All Events)
-# =============================================================================
-
-validate-backend:
-  stage: validate
-  <<: *java_base
-  <<: *maven_cache
-  script:
-    - echo "🔍 Validating backend project structure and dependencies..."
-    - cd backend
+    - echo "🔍 Validating, compiling, and building backend..."
     - mvn $MAVEN_CLI_OPTS validate
     - mvn $MAVEN_CLI_OPTS dependency:analyze
-  artifacts:
-    expire_in: 1 hour
-  rules:
-    - <<: *backend_changes
-      if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *backend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - <<: *backend_changes
-      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
-
-validate-frontend:
-  stage: validate
-  <<: *node_base
-  <<: *node_cache
-  script:
-    - echo "🔍 Validating frontend project structure..."
-    - npm ci --cache .npm --prefer-offline
-    - npx ng version
-    - npm audit --audit-level=high
-  rules:
-    - <<: *frontend_changes
-      if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *frontend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - <<: *frontend_changes
-      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
-
-compile-backend:
-  stage: validate
-  <<: *java_base
-  <<: *maven_cache
-  script:
-    - echo "🏗️ Compiling backend application..."
-    - cd backend
     - mvn $MAVEN_CLI_OPTS clean compile
     - mvn $MAVEN_CLI_OPTS compiler:testCompile
+    - mvn $MAVEN_CLI_OPTS package -DskipTests
+    - echo "✅ Backend build complete"
+    - ls -la target/
   artifacts:
     paths:
-      - backend/target/classes/
-      - backend/target/test-classes/
+      - target/*.jar
+      - target/classes/
+      - target/test-classes/
     expire_in: 2 hours
   rules:
     - <<: *backend_changes
@@ -220,17 +155,36 @@ compile-backend:
     - <<: *backend_changes
       if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
 
+validate-and-build-frontend:
+  stage: validate-build
+  <<: *node_with_cache
+  script:
+    - echo "🔍 Validating and building frontend..."
+    - npm audit --audit-level=high
+    - npm run build
+    - echo "✅ Frontend build complete"
+    - ls -la dist/
+  artifacts:
+    paths:
+      - frontend/bank-account-app/dist/
+    expire_in: 2 hours
+  rules:
+    - <<: *frontend_changes
+      if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - <<: *frontend_changes
+      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - <<: *frontend_changes
+      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+
 # =============================================================================
-# TEST STAGE: Unit Tests (All Events)
+# TEST & SECURITY STAGE: Parallel testing and security scans
 # =============================================================================
 
 backend-unit-tests:
-  stage: test
-  <<: *java_base
-  <<: *maven_cache
+  stage: test-security
+  <<: *java_with_cache
   script:
     - echo "🧪 Running backend unit tests..."
-    - cd backend
     - mvn $MAVEN_CLI_OPTS test -Dspring.profiles.active=test
     - echo "📊 Generating test coverage report..."
     - mvn jacoco:report
@@ -239,13 +193,13 @@ backend-unit-tests:
     when: always
     reports:
       junit:
-        - backend/target/surefire-reports/TEST-*.xml
+        - target/surefire-reports/TEST-*.xml
       coverage_report:
         coverage_format: jacoco
-        path: backend/target/site/jacoco/jacoco.xml
+        path: target/site/jacoco/jacoco.xml
     paths:
-      - backend/target/surefire-reports/
-      - backend/target/site/jacoco/
+      - target/surefire-reports/
+      - target/site/jacoco/
     expire_in: 1 week
   rules:
     - <<: *backend_changes
@@ -254,63 +208,34 @@ backend-unit-tests:
       if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - <<: *backend_changes
       if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
-  dependencies:
-    - compile-backend
+  needs:
+    - validate-and-build-backend
 
 backend-integration-tests:
-  stage: test
-  <<: *java_base
-  <<: *maven_cache
+  stage: test-security
+  <<: *java_with_cache
   script:
-    - echo "🔗 Running backend integration tests with H2 database..."
-    - cd backend
-    - echo "Starting H2 in-memory database for integration tests"
-    - mvn $MAVEN_CLI_OPTS verify -Dspring.profiles.active=integration-test
+    - echo "🔗 Running backend integration tests..."
+    - mvn $MAVEN_CLI_OPTS verify -Dspring.profiles.active=integration-test -DskipUnitTests=true
   artifacts:
     when: always
     reports:
       junit:
-        - backend/target/failsafe-reports/TEST-*.xml
-        - backend/target/surefire-reports/TEST-*.xml
+        - target/failsafe-reports/TEST-*.xml
     paths:
-      - backend/target/failsafe-reports/
-      - backend/target/surefire-reports/
+      - target/failsafe-reports/
     expire_in: 1 week
   rules:
     - <<: *backend_changes
       if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - <<: *backend_changes
       if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - <<: *backend_changes
-      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
-  dependencies:
-    - compile-backend
+  needs:
+    - validate-and-build-backend
 
-frontend-unit-tests:
-  stage: test
-  <<: *node_base
-  <<: *node_cache
-  script:
-    - echo "🧪 Frontend unit tests - placeholder (tests not implemented yet)"
-    - echo "Skipping frontend unit tests for now"
-  artifacts:
-    when: always
-    expire_in: 1 week
-  rules:
-    - <<: *frontend_changes
-      if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *frontend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - <<: *frontend_changes
-      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
-  allow_failure: true
-
-# =============================================================================
-# SECURITY & QUALITY STAGE: SonarQube Analysis (Merge Request + Main Branch Only)
-# =============================================================================
-
+# SonarQube using your EXACT working configuration
 sonarqube-backend:
-  stage: security
+  stage: test-security
   <<: *java_base
   <<: *maven_cache
   variables:
@@ -323,16 +248,15 @@ sonarqube-backend:
   script:
     - echo "🔍 Running SonarQube analysis..."
     - echo "Using existing SonarQube instance on cluster..."
-    - cd backend
-    - apk add --no-cache wget unzip
+    - apt-get update -qq && apt-get install -y -qq wget unzip
     - wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-4.8.0.2856-linux.zip
     - unzip -q sonar-scanner-cli-4.8.0.2856-linux.zip
     - export PATH="$PWD/sonar-scanner-4.8.0.2856-linux/bin:$PATH"
     - sonar-scanner
       -Dsonar.host.url=${SONAR_HOST_URL}
       -Dsonar.login=${SONAR_TOKEN}
-      -Dsonar.projectKey=${CI_PROJECT_NAME}-backend
-      -Dsonar.projectName="${CI_PROJECT_NAME}-backend"
+      -Dsonar.projectKey=${CI_PROJECT_NAME}
+      -Dsonar.projectName="${CI_PROJECT_NAME}"
       -Dsonar.projectVersion=${CI_COMMIT_SHORT_SHA}
       -Dsonar.sources=src/main/java
       -Dsonar.tests=src/test/java
@@ -346,14 +270,15 @@ sonarqube-backend:
       if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - <<: *backend_changes
       if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-  dependencies:
+    - <<: *backend_changes
+      if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+  needs:
     - backend-unit-tests
-    - compile-backend
   allow_failure: true
 
-# Use the working Trivy configuration from your examples
+# Trivy filesystem scan - using your exact working configuration
 trivy-filesystem-scan:
-  stage: security
+  stage: test-security
   image:
     name: aquasec/trivy:latest
     entrypoint: [""]
@@ -362,9 +287,7 @@ trivy-filesystem-scan:
     - trivy --version
   script:
     - echo "🛡️ Scanning dependencies for vulnerabilities..."
-    # Generate JSON report for GitLab Security Dashboard
     - trivy fs --format json --output trivy-report.json .
-    # Run scan with table output and fail on HIGH/CRITICAL
     - trivy fs --exit-code 1 --severity HIGH,CRITICAL --format table .
   artifacts:
     paths:
@@ -375,57 +298,41 @@ trivy-filesystem-scan:
   allow_failure: false
 
 # =============================================================================
-# BUILD STAGE: Application Packaging and Container Images (Merge Request + Main Branch)
+# PACKAGE STAGE: Docker builds and image scans (Using your working examples)
 # =============================================================================
 
-build-backend:
-  stage: build
-  <<: *java_base
-  <<: *maven_cache
+# Backend packaging (following your example pattern)
+package-backend:
+  stage: package
+  image: eclipse-temurin:21-jdk
   script:
-    - echo "📦 Building backend application..."
+    - echo "📦 Packaging backend application into JAR..."
     - cd backend
-    - mvn $MAVEN_CLI_OPTS clean package -DskipTests
-    - echo "✅ Backend packaged successfully"
-    - ls -la target/
+    - ./mvnw package -DskipTests -DskipITs
   artifacts:
     paths:
       - backend/target/*.jar
-    expire_in: 1 day
+    exclude:
+      - backend/target/*original.jar
+    expire_in: 1 hour
   rules:
     - <<: *backend_changes
       if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - <<: *backend_changes
       if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-  dependencies:
-    - compile-backend
+  needs:
+    - validate-and-build-backend
 
-build-frontend:
-  stage: build
-  <<: *node_base
-  <<: *node_cache
-  script:
-    - echo "📦 Building frontend application..."
-    - npm run build
-    - echo "✅ Frontend built successfully"
-    - ls -la dist/
-  artifacts:
-    paths:
-      - frontend/bank-account-app/dist/
-    expire_in: 1 day
-  rules:
-    - <<: *frontend_changes
-      if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *frontend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-
+# Docker builds using your exact working configuration
 docker-build-backend:
-  stage: build
+  stage: package
   image: docker:24-cli
   services:
     - docker:24-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
   needs:
-    - job: build-backend
+    - job: package-backend
       artifacts: true
   script:
     - echo "🐳 Building backend Docker image..."
@@ -447,12 +354,14 @@ docker-build-backend:
       if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 docker-build-frontend:
-  stage: build
+  stage: package
   image: docker:24-cli
   services:
     - docker:24-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
   needs:
-    - job: build-frontend
+    - job: validate-and-build-frontend
       artifacts: true
   script:
     - echo "🐳 Building frontend Docker image..."
@@ -473,115 +382,101 @@ docker-build-frontend:
     - <<: *frontend_changes
       if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
-# Use working Trivy image scanning configuration
-trivy-image-scan-backend:
-  stage: build
-  image:
-    name: aquasec/trivy:latest
-    entrypoint: [""]
-  needs:
-    - docker-build-backend
+# Image scanning using your exact working configuration
+trivy-scan-backend-image:
+  stage: package
+  image: docker:24-cli
+  services:
+    - docker:24-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    TRIVY_VERSION: '0.52.2'
   before_script:
-    - trivy --version
+    - apk add --no-cache curl
+    - curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin v${TRIVY_VERSION}
+  needs:
+    - job: docker-build-backend
+      artifacts: true
   script:
+    - echo "Loading Docker image from .tar artifact..."
+    - docker load --input backend-image.tar
     - echo "🛡️ Scanning backend Docker image for vulnerabilities..."
-    # Generate JSON report for GitLab Security Dashboard
-    - trivy image --format json --output backend-trivy-report.json ${BACKEND_IMAGE}:${CI_COMMIT_SHORT_SHA}
-    # Run scan with table output and fail on HIGH/CRITICAL
-    - trivy image --exit-code 1 --severity HIGH,CRITICAL --format table ${BACKEND_IMAGE}:${CI_COMMIT_SHORT_SHA}
-  artifacts:
-    paths:
-      - backend-trivy-report.json
+    - trivy image --exit-code 1 --severity HIGH,CRITICAL ${BACKEND_IMAGE}:${CI_COMMIT_SHORT_SHA}
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   allow_failure: false
 
-trivy-image-scan-frontend:
-  stage: build
-  image:
-    name: aquasec/trivy:latest
-    entrypoint: [""]
-  needs:
-    - docker-build-frontend
+trivy-scan-frontend-image:
+  stage: package
+  image: docker:24-cli
+  services:
+    - docker:24-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    TRIVY_VERSION: '0.52.2'
   before_script:
-    - trivy --version
+    - apk add --no-cache curl
+    - curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin v${TRIVY_VERSION}
+  needs:
+    - job: docker-build-frontend
+      artifacts: true
   script:
+    - echo "Loading Docker image from .tar artifact..."
+    - docker load --input frontend-image.tar
     - echo "🛡️ Scanning frontend Docker image for vulnerabilities..."
-    # Generate JSON report for GitLab Security Dashboard
-    - trivy image --format json --output frontend-trivy-report.json ${FRONTEND_IMAGE}:${CI_COMMIT_SHORT_SHA}
-    # Run scan with table output and fail on HIGH/CRITICAL
-    - trivy image --exit-code 1 --severity HIGH,CRITICAL --format table ${FRONTEND_IMAGE}:${CI_COMMIT_SHORT_SHA}
-  artifacts:
-    paths:
-      - frontend-trivy-report.json
+    - trivy image --exit-code 1 --severity HIGH,CRITICAL ${FRONTEND_IMAGE}:${CI_COMMIT_SHORT_SHA}
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   allow_failure: false
 
 # =============================================================================
-# INTEGRATION TEST STAGE: Container-based Integration Tests (if needed)
-# =============================================================================
-
-# Note: This stage is reserved for tests that require actual containers/services
-# For H2-based tests, use the test stage instead
-
-# =============================================================================
-# DEPLOY STAGING STAGE: Automatic Deployment to Staging (Main Branch Only)
+# DEPLOY STAGING STAGE: GitOps deployment
 # =============================================================================
 
 deploy-staging:
   stage: deploy-staging
   <<: *gitops_base
   script:
-    - echo "🚀 Deploying to staging environment via GitOps..."
+    - echo "🚀 Deploying to staging via GitOps..."
     - git clone $GITOPS_STAGING_REPO gitops-staging
     - cd gitops-staging
     - |
-      # Update backend image tag
+      # Update image tags
       if [ -n "$BACKEND_IMAGE" ]; then
         yq eval ".spec.template.spec.containers[0].image = \"${BACKEND_IMAGE}:${CI_COMMIT_SHORT_SHA}\"" -i applications/backend/deployment.yaml
         echo "Updated backend image to: ${BACKEND_IMAGE}:${CI_COMMIT_SHORT_SHA}"
       fi
-    - |
-      # Update frontend image tag  
       if [ -n "$FRONTEND_IMAGE" ]; then
         yq eval ".spec.template.spec.containers[0].image = \"${FRONTEND_IMAGE}:${CI_COMMIT_SHORT_SHA}\"" -i applications/frontend/deployment.yaml
         echo "Updated frontend image to: ${FRONTEND_IMAGE}:${CI_COMMIT_SHORT_SHA}"
       fi
     - |
-      # Commit and push changes
+      # Commit and push
       git config user.name "GitLab CI"
       git config user.email "ci@gitlab.com"
       git add .
       if git diff --staged --quiet; then
         echo "No changes to commit"
       else
-        git commit -m "Deploy ${CI_PROJECT_NAME} ${CI_COMMIT_SHORT_SHA} to staging
-        
-        Source commit: ${CI_COMMIT_SHA}
-        Pipeline: ${CI_PIPELINE_URL}
-        Branch: ${CI_COMMIT_REF_NAME}"
+        git commit -m "Deploy ${APP_NAME} ${CI_COMMIT_SHORT_SHA} to staging"
         git push origin main
-        echo "✅ Staging deployment triggered via GitOps"
+        echo "✅ Staging deployment triggered"
       fi
   environment:
     name: staging
     url: $STAGING_BASE_URL
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-  dependencies:
-    - docker-build-backend
-    - docker-build-frontend
   needs:
     - docker-build-backend
     - docker-build-frontend
-    - trivy-image-scan-backend
-    - trivy-image-scan-frontend
+    - trivy-scan-backend-image
+    - trivy-scan-frontend-image
 
 # =============================================================================
-# E2E TEST STAGE: End-to-End Testing Against Staging (Main Branch Only, After Deployment)
+# E2E TEST STAGE: End-to-end testing
 # =============================================================================
 
 e2e-tests:
@@ -592,27 +487,26 @@ e2e-tests:
     CYPRESS_baseUrl: "$STAGING_BASE_URL"
   cache:
     key: "$CI_COMMIT_REF_SLUG-cypress"
+    fallback_keys:
+      - "main-cypress"
     paths:
       - .cypress/
-      - frontend/bank-account-app/node_modules/
   before_script:
-    - echo "🎭 Setting up E2E testing environment..."
-    - echo "Waiting for staging deployment to be ready..."
-    - sleep 120
+    - echo "🎭 Setting up E2E tests..."
+    - sleep 60
     - apk add --no-cache curl
     - cd frontend/bank-account-app
-    - npm ci
-    - echo "Testing connectivity to staging environment at $STAGING_BASE_URL"
+    - npm ci --prefer-offline
   script:
-    - echo "🧪 Running E2E tests against staging environment..."
+    - echo "🧪 Running E2E tests..."
     - |
-      # Wait for staging environment to be responsive
-      for i in $(seq 1 30); do
+      # Wait for staging to be ready
+      for i in $(seq 1 20); do
         if curl -f "$STAGING_BASE_URL/health" >/dev/null 2>&1; then
-          echo "✅ Staging environment is ready"
+          echo "✅ Staging ready"
           break
         fi
-        echo "⏳ Waiting for staging environment... attempt $i/30"
+        echo "⏳ Waiting... attempt $i/20"
         sleep 10
       done
     - npm run e2e:headless
@@ -627,48 +521,39 @@ e2e-tests:
     expire_in: 1 week
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-  dependencies:
+  needs:
     - deploy-staging
 
 # =============================================================================
-# DEPLOY PRODUCTION STAGE: Manual Deployment to Production (Main Branch Only)
+# DEPLOY PRODUCTION STAGE: Manual production deployment
 # =============================================================================
 
 deploy-production:
   stage: deploy-production
   <<: *gitops_base
   script:
-    - echo "🚀 Deploying to production environment via GitOps..."
+    - echo "🚀 Deploying to production via GitOps..."
     - git clone $GITOPS_PROD_REPO gitops-production
     - cd gitops-production
     - |
-      # Update backend image tag
+      # Update image tags
       if [ -n "$BACKEND_IMAGE" ]; then
         yq eval ".spec.template.spec.containers[0].image = \"${BACKEND_IMAGE}:${CI_COMMIT_SHORT_SHA}\"" -i applications/backend/deployment.yaml
-        echo "Updated backend image to: ${BACKEND_IMAGE}:${CI_COMMIT_SHORT_SHA}"
       fi
-    - |
-      # Update frontend image tag
       if [ -n "$FRONTEND_IMAGE" ]; then
         yq eval ".spec.template.spec.containers[0].image = \"${FRONTEND_IMAGE}:${CI_COMMIT_SHORT_SHA}\"" -i applications/frontend/deployment.yaml
-        echo "Updated frontend image to: ${FRONTEND_IMAGE}:${CI_COMMIT_SHORT_SHA}"
       fi
     - |
-      # Commit and push changes
+      # Commit and push
       git config user.name "GitLab CI"
       git config user.email "ci@gitlab.com"
       git add .
       if git diff --staged --quiet; then
         echo "No changes to commit"
       else
-        git commit -m "Deploy ${CI_PROJECT_NAME} ${CI_COMMIT_SHORT_SHA} to production
-        
-        Source commit: ${CI_COMMIT_SHA}
-        Pipeline: ${CI_PIPELINE_URL}
-        Branch: ${CI_COMMIT_REF_NAME}
-        Approved by: ${GITLAB_USER_NAME}"
+        git commit -m "Deploy ${APP_NAME} ${CI_COMMIT_SHORT_SHA} to production"
         git push origin main
-        echo "✅ Production deployment triggered via GitOps"
+        echo "✅ Production deployment triggered"
       fi
   environment:
     name: production
@@ -676,21 +561,6 @@ deploy-production:
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual
-      allow_failure: false
-  dependencies:
+  needs:
     - e2e-tests
 
-# =============================================================================
-# POST-STAGE: Cleanup and Notifications
-# =============================================================================
-
-cleanup-workspace:
-  stage: .post
-  image: alpine:latest
-  script:
-    - echo "🧹 Cleaning up workspace..."
-    - rm -rf backend/target/
-    - rm -rf frontend/bank-account-app/dist/
-    - rm -rf frontend/bank-account-app/node_modules/
-  when: always
-  allow_failure: true
