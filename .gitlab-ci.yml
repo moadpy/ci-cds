@@ -291,8 +291,8 @@ frontend-unit-tests:
   <<: *node_base
   <<: *node_cache
   script:
-    - echo "🧪 Running frontend unit tests..."
-    
+    - echo "🧪 Frontend unit tests - placeholder (tests not implemented yet)"
+    - echo "Skipping frontend unit tests for now"
   artifacts:
     when: always
     expire_in: 1 week
@@ -303,6 +303,7 @@ frontend-unit-tests:
       if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - <<: *frontend_changes
       if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+  allow_failure: true
 
 # =============================================================================
 # SECURITY & QUALITY STAGE: SonarQube Analysis (Merge Request + Main Branch Only)
@@ -535,6 +536,8 @@ deploy-staging:
     - docker-build-backend
     - docker-build-frontend
   needs:
+    - docker-build-backend
+    - docker-build-frontend
     - trivy-image-scan-backend
     - trivy-image-scan-frontend
 
