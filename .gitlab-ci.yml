@@ -254,11 +254,11 @@ sonarqube-backend:
     - echo "🔍 Running SonarQube analysis..."
     - echo "Using existing SonarQube instance on cluster..."
     - echo "Java version: $(java --version)"
-    # Use SonarScanner 5.0.1 which is compatible with Java 21
     - wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
     - unzip -q sonar-scanner-cli-5.0.1.3006-linux.zip
     - export PATH="$PWD/sonar-scanner-5.0.1.3006-linux/bin:$PATH"
-    - sonar-scanner
+    - >
+      sonar-scanner
       -Dsonar.host.url=${SONAR_HOST_URL}
       -Dsonar.login=${SONAR_TOKEN}
       -Dsonar.projectKey=${CI_PROJECT_NAME}
