@@ -342,34 +342,23 @@ sonarqube-backend:
     - compile-backend
   allow_failure: false
 
-dependency-security-scan:
+# Replaced OWASP with Trivy for better container-native scanning
+trivy-filesystem-scan:
   stage: security
-  <<: *java_base
-  <<: *maven_cache
+  image: aquasec/trivy:latest
   script:
-    - echo "🛡️ Running dependency security scan..."
-    - cd backend
-    # Use a more stable version and add error handling
-    - mvn $MAVEN_CLI_OPTS org.owasp:dependency-check-maven:9.0.10:check -DfailBuildOnCVSS=8 -DskipProvidedScope=true -DskipRuntimeScope=false || echo "⚠️ Security scan completed with warnings"
-    # Generate a simplified report if the main one fails
-    - |
-      if [ ! -f target/dependency-check-report.html ]; then
-        echo "📋 Generating alternative security report..."
-        mvn $MAVEN_CLI_OPTS dependency:tree > target/dependency-tree.txt
-        echo "<html><body><h1>Dependency Security Scan</h1><p>Scan completed. See dependency-tree.txt for details.</p></body></html>" > target/dependency-check-report.html
-      fi
+    - echo "🛡️ Running Trivy filesystem scan for vulnerabilities..."
+    # Generate report for GitLab UI
+    - trivy fs --format template --template "@contrib/gitlab.tpl" -o gl-dependency-scanning-report.json .
+    # Fail on HIGH or CRITICAL vulnerabilities, but report others
+    - trivy fs --exit-code 1 --severity CRITICAL,HIGH .
   artifacts:
-    when: always
-    paths:
-      - backend/target/dependency-check-report.html
-      - backend/target/dependency-tree.txt
-    expire_in: 1 week
+    reports:
+      dependency_scanning: gl-dependency-scanning-report.json
   rules:
-    - <<: *backend_changes
-      if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *backend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-  allow_failure: true
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  allow_failure: false # Fail the pipeline on critical/high vulnerabilities
 
 # =============================================================================
 # BUILD STAGE: Application Packaging and Container Images (Merge Request + Main Branch)
@@ -456,6 +445,41 @@ docker-build-frontend:
   dependencies:
     - build-frontend
 
+# Scan the container images after they are built and pushed
+trivy-image-scan-backend:
+  stage: build
+  image: aquasec/trivy:latest
+  script:
+    - echo "🛡️ Scanning backend Docker image for vulnerabilities..."
+    # Log in to GitLab Registry
+    - trivy image --exit-code 0 --format template --template "@contrib/gitlab-container-scanning.tpl" -o gl-container-scanning-report.json --scanners vuln,secret "${BACKEND_IMAGE}:${CI_COMMIT_SHORT_SHA}"
+    # Fail on high or critical vulnerabilities
+    - trivy image --exit-code 1 --severity CRITICAL,HIGH "${BACKEND_IMAGE}:${CI_COMMIT_SHORT_SHA}"
+  artifacts:
+    reports:
+      container_scanning: gl-container-scanning-report.json
+  needs:
+    - docker-build-backend
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+trivy-image-scan-frontend:
+  stage: build
+  image: aquasec/trivy:latest
+  script:
+    - echo "🛡️ Scanning frontend Docker image for vulnerabilities..."
+    - trivy image --exit-code 0 --format template --template "@contrib/gitlab-container-scanning.tpl" -o gl-container-scanning-report.json --scanners vuln,secret "${FRONTEND_IMAGE}:${CI_COMMIT_SHORT_SHA}"
+    - trivy image --exit-code 1 --severity CRITICAL,HIGH "${FRONTEND_IMAGE}:${CI_COMMIT_SHORT_SHA}"
+  artifacts:
+    reports:
+      container_scanning: gl-container-scanning-report.json
+  needs:
+    - docker-build-frontend
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
 # =============================================================================
 # INTEGRATION TEST STAGE: Container-based Integration Tests (if needed)
 # =============================================================================
@@ -510,6 +534,9 @@ deploy-staging:
   dependencies:
     - docker-build-backend
     - docker-build-frontend
+  needs:
+    - trivy-image-scan-backend
+    - trivy-image-scan-frontend
 
 # =============================================================================
 # E2E TEST STAGE: End-to-End Testing Against Staging (Main Branch Only, After Deployment)
