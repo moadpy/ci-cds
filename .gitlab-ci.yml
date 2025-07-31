@@ -133,6 +133,8 @@ validate-and-build-backend:
   stage: validate-build
   <<: *java_with_cache
   <<: *resource_limits
+  tags:
+    - kubernetes  # Run on your cluster (Job 1/4)
   script:
     - echo "🔍 Validating, compiling, and building backend..."
     - mvn $MAVEN_CLI_OPTS validate
@@ -149,16 +151,16 @@ validate-and-build-backend:
       - backend/target/test-classes/
     expire_in: 2 hours
   rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH  # Always run on main
     - <<: *backend_changes
       if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *backend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - <<: *backend_changes
       if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
 
 validate-and-build-frontend:
   stage: validate-build
   <<: *node_with_cache
+  # No tags = Use GitLab shared runners
   script:
     - echo "🔍 Validating and building frontend..."
     - npm audit --audit-level=high
@@ -170,10 +172,9 @@ validate-and-build-frontend:
       - frontend/bank-account-app/dist/
     expire_in: 2 hours
   rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH  # Always run on main
     - <<: *frontend_changes
       if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *frontend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - <<: *frontend_changes
       if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
 
@@ -184,6 +185,8 @@ validate-and-build-frontend:
 backend-unit-tests:
   stage: test-security
   <<: *java_with_cache
+  tags:
+    - kubernetes  # Run on your cluster (Job 2/4)
   script:
     - echo "🧪 Running backend unit tests..."
     - mvn $MAVEN_CLI_OPTS test -Dspring.profiles.active=test
@@ -203,10 +206,9 @@ backend-unit-tests:
       - backend/target/site/jacoco/
     expire_in: 1 week
   rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH  # Always run on main
     - <<: *backend_changes
       if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *backend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - <<: *backend_changes
       if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
   needs:
@@ -215,6 +217,7 @@ backend-unit-tests:
 backend-integration-tests:
   stage: test-security
   <<: *java_with_cache
+  # No tags = Use GitLab shared runners
   script:
     - echo "🔗 Running backend integration tests..."
     - mvn $MAVEN_CLI_OPTS verify -Dspring.profiles.active=integration-test -DskipUnitTests=true
@@ -227,10 +230,9 @@ backend-integration-tests:
       - backend/target/failsafe-reports/
     expire_in: 1 week
   rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH  # Always run on main
     - <<: *backend_changes
       if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *backend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   needs:
     - validate-and-build-backend
 
@@ -239,6 +241,8 @@ sonarqube-backend:
   stage: test-security
   <<: *java_base
   <<: *maven_cache
+  tags:
+    - kubernetes  # MUST run on your cluster (Job 3/4) - SonarQube instance is there
   variables:
     SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
     GIT_DEPTH: "0"
@@ -256,10 +260,9 @@ sonarqube-backend:
     - export PATH="$PWD/sonar-scanner-5.0.1.3006-linux/bin:$PATH"
     - sonar-scanner -Dsonar.host.url=${SONAR_HOST_URL} -Dsonar.login=${SONAR_TOKEN} -Dsonar.projectKey=${CI_PROJECT_NAME} -Dsonar.projectName="${CI_PROJECT_NAME}" -Dsonar.projectVersion=${CI_COMMIT_SHORT_SHA} -Dsonar.sources=src/main/java -Dsonar.tests=src/test/java -Dsonar.java.binaries=target/classes -Dsonar.java.test.binaries=target/test-classes -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml -Dsonar.junit.reportPaths=target/surefire-reports -Dsonar.qualitygate.wait=true
   rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH  # Always run on main
     - <<: *backend_changes
       if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *backend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - <<: *backend_changes
       if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
   needs:
@@ -272,6 +275,7 @@ trivy-filesystem-scan:
   image:
     name: aquasec/trivy:latest
     entrypoint: [""]
+  # No tags = Use GitLab shared runners
   dependencies: []
   before_script:
     - trivy --version
@@ -295,6 +299,8 @@ trivy-filesystem-scan:
 package-backend:
   stage: package
   image: eclipse-temurin:21-jdk
+  tags:
+    - kubernetes  # Run on your cluster (Job 4/4)
   script:
     - echo "📦 Packaging backend application into JAR..."
     - cd backend
@@ -307,10 +313,9 @@ package-backend:
       - backend/target/*original.jar
     expire_in: 1 hour
   rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH  # Always run on main
     - <<: *backend_changes
       if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *backend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   needs:
     - validate-and-build-backend
 
@@ -320,6 +325,7 @@ docker-build-backend:
   image:
     name: gcr.io/kaniko-project/executor:v1.9.0-debug
     entrypoint: [""]
+  # No tags = Use GitLab shared runners
   script:
     - echo "🐳 Building backend Docker image with Kaniko..."
     - mkdir -p /kaniko/.docker
@@ -332,10 +338,9 @@ docker-build-backend:
       --cache=true
       --cache-ttl=24h
   rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH  # Always run on main
     - <<: *backend_changes
       if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *backend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   needs:
     - package-backend
 
@@ -344,6 +349,7 @@ docker-build-frontend:
   image:
     name: gcr.io/kaniko-project/executor:v1.9.0-debug
     entrypoint: [""]
+  # No tags = Use GitLab shared runners
   script:
     - echo "🐳 Building frontend Docker image with Kaniko..."
     - mkdir -p /kaniko/.docker
@@ -356,10 +362,9 @@ docker-build-frontend:
       --cache=true
       --cache-ttl=24h
   rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH  # Always run on main
     - <<: *frontend_changes
       if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - <<: *frontend_changes
-      if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   needs:
     - validate-and-build-frontend
 
@@ -369,6 +374,7 @@ trivy-scan-backend-image:
   image:
     name: aquasec/trivy:latest
     entrypoint: [""]
+  # No tags = Use GitLab shared runners
   before_script:
     - trivy --version
   script:
@@ -390,6 +396,7 @@ trivy-scan-frontend-image:
   image:
     name: aquasec/trivy:latest
     entrypoint: [""]
+  # No tags = Use GitLab shared runners
   before_script:
     - trivy --version
   script:
