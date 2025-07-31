@@ -267,19 +267,7 @@ sonarqube-backend:
     - export PATH="$PWD/sonar-scanner-5.0.1.3006-linux/bin:$PATH"
 
     # Run SonarQube analysis using pre-compiled artifacts
-    - sonar-scanner
-      -Dsonar.host.url=${SONAR_HOST_URL}
-      -Dsonar.login=${SONAR_TOKEN}
-      -Dsonar.projectKey=${CI_PROJECT_NAME}
-      -Dsonar.projectName="${CI_PROJECT_NAME}"
-      -Dsonar.projectVersion=${CI_COMMIT_SHORT_SHA}
-      -Dsonar.sources=src/main/java
-      -Dsonar.tests=src/test/java
-      -Dsonar.java.binaries=target/classes
-      -Dsonar.java.test.binaries=target/test-classes
-      -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
-      -Dsonar.junit.reportPaths=target/surefire-reports
-      -Dsonar.qualitygate.wait=true
+    - sonar-scanner -Dsonar.host.url=${SONAR_HOST_URL} -Dsonar.login=${SONAR_TOKEN} -Dsonar.projectKey=${CI_PROJECT_NAME} -Dsonar.projectName="${CI_PROJECT_NAME}" -Dsonar.projectVersion=${CI_COMMIT_SHORT_SHA} -Dsonar.sources=src/main/java -Dsonar.tests=src/test/java -Dsonar.java.binaries=target/classes -Dsonar.java.test.binaries=target/test-classes -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml -Dsonar.junit.reportPaths=target/surefire-reports -Dsonar.qualitygate.wait=true
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH  # Always run on main
     - <<: *backend_changes
