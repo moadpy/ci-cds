@@ -236,13 +236,13 @@ backend-integration-tests:
   needs:
     - validate-and-build-backend
 
-# SonarQube using your EXACT working configuration
+# Fixed SonarQube job - reuses already compiled artifacts
 sonarqube-backend:
   stage: test-security
   <<: *java_base
   <<: *maven_cache
   tags:
-    - kubernetes  # MUST run on your cluster (Job 3/4) - SonarQube instance is there
+    - kubernetes  # MUST run on your cluster - SonarQube instance is there
   variables:
     SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
     GIT_DEPTH: "0"
@@ -253,12 +253,33 @@ sonarqube-backend:
   script:
     - echo "🔍 Running SonarQube analysis..."
     - echo "Using existing SonarQube instance on cluster..."
+
+    # Verify we have the compiled artifacts from previous stage
+    - ls -la target/
+    - test -d target/classes || { echo "ERROR: target/classes not found from previous stage"; exit 1; }
+    - test -d target/test-classes || { echo "ERROR: target/test-classes not found from previous stage"; exit 1; }
+
+    # Install and run SonarQube scanner
     - apt-get update -qq && apt-get install -y -qq wget unzip
     - java -version
     - wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
     - unzip -q sonar-scanner-cli-5.0.1.3006-linux.zip
     - export PATH="$PWD/sonar-scanner-5.0.1.3006-linux/bin:$PATH"
-    - sonar-scanner -Dsonar.host.url=${SONAR_HOST_URL} -Dsonar.login=${SONAR_TOKEN} -Dsonar.projectKey=${CI_PROJECT_NAME} -Dsonar.projectName="${CI_PROJECT_NAME}" -Dsonar.projectVersion=${CI_COMMIT_SHORT_SHA} -Dsonar.sources=src/main/java -Dsonar.tests=src/test/java -Dsonar.java.binaries=target/classes -Dsonar.java.test.binaries=target/test-classes -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml -Dsonar.junit.reportPaths=target/surefire-reports -Dsonar.qualitygate.wait=true
+
+    # Run SonarQube analysis using pre-compiled artifacts
+    - sonar-scanner
+      -Dsonar.host.url=${SONAR_HOST_URL}
+      -Dsonar.login=${SONAR_TOKEN}
+      -Dsonar.projectKey=${CI_PROJECT_NAME}
+      -Dsonar.projectName="${CI_PROJECT_NAME}"
+      -Dsonar.projectVersion=${CI_COMMIT_SHORT_SHA}
+      -Dsonar.sources=src/main/java
+      -Dsonar.tests=src/test/java
+      -Dsonar.java.binaries=target/classes
+      -Dsonar.java.test.binaries=target/test-classes
+      -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
+      -Dsonar.junit.reportPaths=target/surefire-reports
+      -Dsonar.qualitygate.wait=true
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH  # Always run on main
     - <<: *backend_changes
@@ -266,7 +287,7 @@ sonarqube-backend:
     - <<: *backend_changes
       if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
   needs:
-    - backend-unit-tests
+    - backend-unit-tests  # This job already has the compiled artifacts AND test coverage
   allow_failure: false
 
 # Trivy filesystem scan - using your exact working configuration
@@ -456,6 +477,7 @@ deploy-staging:
     - docker-build-frontend
     - trivy-scan-backend-image
     - trivy-scan-frontend-image
+    - sonarqube-backend
 
 # =============================================================================
 # E2E TEST STAGE: End-to-end testing
