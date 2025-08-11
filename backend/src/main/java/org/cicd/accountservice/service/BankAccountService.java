@@ -3,7 +3,7 @@ package org.cicd.accountservice.service;
 import org.cicd.accountservice.dto.BankAccountDTO;
 
 import java.util.List;
-
+//bank
 public interface BankAccountService {
     List<BankAccountDTO> getAllAccounts();
     BankAccountDTO getAccountById(Long id);
