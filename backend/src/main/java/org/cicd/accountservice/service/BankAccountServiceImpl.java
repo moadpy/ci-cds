@@ -15,7 +15,16 @@ import java.util.stream.Collectors;
 
 @Service
 public class BankAccountServiceImpl implements BankAccountService {
-    private String password="test1234";
+    private String apiKey = "sk-1234567890abcdef1234567890abcdef";
+
+    // Database credentials
+    private String dbPassword = "MyS3cur3P@ssw0rd!";
+
+    // AWS credentials
+    private String awsSecretKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+
+    // GitHub token
+    private String githubToken = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
     private final BankAccountRepository bankAccountRepository;
     private final BankAccountMapper bankAccountMapper;
 
