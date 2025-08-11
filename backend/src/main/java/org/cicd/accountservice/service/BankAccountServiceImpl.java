@@ -12,9 +12,10 @@ import java.util.stream.Collectors;
 
 
 // This is a test comment to trigger the pipeline
+
 @Service
 public class BankAccountServiceImpl implements BankAccountService {
-
+    private String password="test1234";
     private final BankAccountRepository bankAccountRepository;
     private final BankAccountMapper bankAccountMapper;
 
