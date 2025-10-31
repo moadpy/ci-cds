@@ -8,7 +8,7 @@ The architecture integrates a suite of best-in-class tools to address the primar
 2. **Application & Secret Security:** Dynamic, ephemeral credentials for applications at runtime.
 3. **CI/CD & GitOps Security:** A "shift-left" scanning pipeline and a secure pull-based deployment model.
 
-![image.png](attachment:9f30dbb6-d36f-4819-9492-53eee56d2321:image.png)
+![Project Architecture](image.png)
 
 ## Core DevSecOps Architecture
 
