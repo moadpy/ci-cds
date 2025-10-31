@@ -1,76 +1,105 @@
-# Bank Account Service
+# Secure Cloud-Native Platform: A DevSecOps Approach
 
-**Note:** This is a simple Spring Boot application created for the purpose of demonstrating a CI/CD pipeline. The focus is on the pipeline itself, not the complexity of the application.
+This project demonstrates a secure, end-to-end, cloud-native platform built on Kubernetes. It is designed to embed security into every phase of the software development lifecycle (SDLC), from developer identity and code creation to production deployment and runtime secrets management.
 
-This is a simple RESTful web service for managing bank accounts. It is built with Spring Boot, Java 17, and Maven.
+The architecture integrates a suite of best-in-class tools to address the primary pillars of DevSecOps:
 
-## Project Structure
+1. **Platform & Identity Security:** Centralized, OIDC-based authentication for all platform users.
+2. **Application & Secret Security:** Dynamic, ephemeral credentials for applications at runtime.
+3. **CI/CD & GitOps Security:** A "shift-left" scanning pipeline and a secure pull-based deployment model.
 
-The project is structured into the following packages:
+![image.png](attachment:9f30dbb6-d36f-4819-9492-53eee56d2321:image.png)
 
-*   `model`: Contains the JPA entity `BankAccount`.
-*   `repository`: Contains the `BankAccountRepository` interface, which extends `JpaRepository` for database operations.
-*   `service`: Contains the business logic for the application. `BankAccountService` is an interface that defines the service methods, and `BankAccountServiceImpl` is its implementation.
-*   `controller`: Contains the `BankAccountController`, which exposes the REST API endpoints.
+## Core DevSecOps Architecture
 
-## API Endpoints
+The platform's security model is built on three foundational pillars that decouple responsibilities and enforce the principle of least privilege.
 
-The following endpoints are available:
+### 1. Platform & Identity Security (Keycloak)
 
-*   `GET /api/accounts`: Get all bank accounts.
-*   `GET /api/accounts/{id}`: Get a bank account by its ID.
-*   `POST /api/accounts`: Create a new bank account.
-*   `PUT /api/accounts/{id}`: Update an existing bank account.
-*   `DELETE /api/accounts/{id}`: Delete a bank account.
+User access to the Kubernetes clusters is not managed with static `kubeconfig` files, which are insecure and difficult to audit.
 
-## Testing
+- **Centralized Authentication:** **Keycloak** is used as the central Identity Provider (IdP).
+- **OIDC Integration:** The RKE2 Kubernetes API server is configured to authenticate users via the **OpenID Connect (OIDC)** protocol.
+- **Secure `kubectl` Access:** Developers and operators use `kubectl` by authenticating against Keycloak, which issues short-lived, auditable tokens. Access is granted based on centralized group memberships, not individual static credentials.
 
-The application includes both unit and integration tests. If you are new to testing, here is a brief overview.
+### 2. Application & Secret Security (HashiCorp Vault)
 
-### What are Tests in Software?
+Application secrets (database passwords, API keys) are eliminated from Git repositories, CI/CD variables, and Docker images.
 
-In software development, tests are small programs that check if your main application's code is working as you expect. We write code to test our code. This helps us catch bugs early, make changes with confidence, and ensure the application is reliable.
+- **Centralized Secrets Management:** **HashiCorp Vault** serves as the single source of truth for all secrets, providing encryption-at-rest and detailed audit logs.
+- **Dynamic Secrets (Gold Standard):** For critical services like databases, the platform uses the **Vault Agent Injector**.
+    1. Applications request database credentials on startup.
+    2. Vault dynamically generates a *new, unique* username/password for that specific pod with a short Time-To-Live (TTL).
+    3. The agent injects these credentials into the pod's filesystem.
+    4. The sidecar agent automatically renews the credential lease and revokes it when the pod is terminated.
+- **Static Secrets (GitOps Pattern):** For applications that must consume native Kubernetes `Secret` objects (e.g., third-party Helm charts), the **Vault Secrets Operator** is used. It securely synchronizes static secrets from Vault into the cluster as Kubernetes `Secret` objects, keeping them out of Git.
 
-### Unit Tests
+### 3. Deployment & GitOps Security (FluxCD)
 
-**What they are:** Unit tests are designed to check the smallest testable parts of an application in isolation. In our case, this means testing a single method within a class, like a method in our `BankAccountServiceImpl`.
+The platform uses a secure, pull-based **GitOps** model, which creates a critical separation of concerns between the CI and CD processes.
 
-**How they work:** When we unit test a piece of code, we want to isolate it from its dependencies. For example, our `BankAccountServiceImpl` depends on `BankAccountRepository` to talk to the database. In a unit test, we don't want to involve the real database. Instead, we use a "mock" or a "fake" version of the `BankAccountRepository`. We use a library called **Mockito** to create these mocks.
+- **CI Role (Build & Push):** The GitLab CI pipeline's *only* role is to build, test, scan, and push a trusted container image to the registry.
+- **GitOps Handover:** The CI pipeline **does not** have administrative credentials to the Kubernetes cluster. Its final job is to commit an image tag update to a separate, dedicated GitOps repository.
+- **CD Role (Pull & Reconcile):** **FluxCD** runs inside the Kubernetes cluster. It continuously monitors the GitOps repository. When it detects the new image tag commit, *it* pulls the change and applies it to the cluster, managing the entire deployment. This is inherently more secure and provides a full audit trail for every change.
 
-This allows us to ask questions like: "When I call the `createAccount` method in my service, does it correctly call the `save` method on the repository?" We can check this interaction without needing a database at all. This makes unit tests very fast and focused.
+## The Secure CI/CD Pipeline (Shift-Left)
 
-You can find our unit tests in `src/test/java/org/cicd/accountservice/service/BankAccountServiceImplTest.java`.
+The GitLab CI pipeline is a multi-stage workflow that provides progressively deeper security validation. It is intelligently configured as a "monorepo" to only run jobs relevant to the code that changed (backend or frontend).
 
-### Integration Tests
+### Pipeline 1: Draft Merge Request (Fast Feedback)
 
-**What they are:** After testing the small parts in isolation, we need to check if they work together correctly. This is what integration tests are for. They test the integration between different layers of the application.
+- **Trigger:** Developer opens a **Draft** Merge Request.
+- **Goal:** Provide the fastest possible feedback on basic errors and critical security flaws.
+- **Key Jobs:**
+    - `secret-detection`: (Fail-Fast) Uses **Gitleaks** to scan for hardcoded secrets. Fails immediately if any are found.
+    - `validate-and-build`: Compiles the code (Maven/NPM) and runs dependency analysis.
+    - `backend-unit-tests`: Runs fast unit tests to check business logic and generates a JaCoCo code coverage report.
 
-**How they work:** For our application, an integration test will check the complete flow from the API endpoint to the database. For example, it will simulate a real HTTP request to `POST /api/accounts` and verify that a new bank account is actually saved in the database and that the API returns the correct response.
+### Pipeline 2: Active Merge Request (Security Gate)
 
-For these tests, we use a real Spring Boot application context and a real (but temporary, in-memory) **H2 database**. This ensures that our controller, service, repository, and database configuration are all working together as expected. We use **MockMvc** to make the simulated HTTP requests.
+- **Trigger:** Developer marks the Merge Request as **"Ready"**.
+- **Goal:** Perform a deep security and quality analysis to ensure code is safe to merge into `main`.
+- **Key Jobs:** (Runs all jobs from Pipeline 1, plus)
+    - `sonarqube-backend`: (SAST) Pushes code to **SonarQube** for deep Static Application Security Testing (SAST) and quality analysis. The pipeline fails if the defined **Quality Gate** (e.g., "No new Critical vulnerabilities") is not met.
+    - `trivy-filesystem-scan`: (SCA) Uses **Trivy** to scan `pom.xml` and `package.json` for known vulnerabilities in third-party dependencies *before* they are built into an image.
+    - `backend-integration-tests`: Runs integration tests to ensure new changes do not break existing component interactions.
 
-You can find our integration tests in `src/test/java/org/cicd/accountservice/controller/BankAccountControllerTest.java`.
+### Pipeline 3: Main Branch (Build & Deploy)
 
-## Building and Running the Application
+- **Trigger:** The Merge Request is approved and **merged into the `main` branch**.
+- **Goal:** Build the final, trusted container images, perform a final artifact scan, and trigger the GitOps deployment to staging.
+- **Key Jobs:** (Runs all jobs from Pipeline 2, plus)
+    - `docker-build-backend`/`frontend`: Packages the application into immutable container images using Docker and **Kaniko**. Images are tagged with the unique commit SHA and pushed to the GitLab Container Registry.
+    - `trivy-scan-backend-image`: (Container Scan) This is a critical second scan. Trivy inspects the *final container image* for vulnerabilities in its base OS and all system libraries.
+    - `deploy-staging`: (GitOps Handover) Clones the separate GitOps repository, uses `yq` to update the image tag in the Kubernetes manifests, and pushes the change, triggering FluxCD to deploy.
 
-To build the application, run the following command:
+## Technology Stack
 
-```bash
-mvn clean install
-```
+| **Domain** | **Tool** | **Purpose** |
+| --- | --- | --- |
+| **Platform** | **RKE2** | Security-hardened, CNCF-certified Kubernetes distribution. |
+| **CI/CD & GitOps** | **GitLab CI** | Source Code Management (SCM) and CI pipeline orchestration. |
+|  | **FluxCD** | The in-cluster GitOps operator for pull-based deployments. |
+| **Security** | **HashiCorp Vault** | Centralized static and dynamic secrets management. |
+|  | **Keycloak** | Identity & Access Management (IAM) provider for OIDC authentication. |
+|  | **SonarQube** | Static Application Security Testing (SAST) and code quality gate. |
+|  | **Trivy** | Software Composition Analysis (SCA) and Container Image Scanning. |
+|  | **Gitleaks** | Secret detection in source code. |
+| **Application** | **Java 21 & Spring Boot** | Backend microservice. |
+|  | **Angular & Node.js** | Frontend application. |
+| **Containerization** | **Docker / Kaniko** | Building container images. |
 
-To run the application, run the following command:
+## Future Improvements
 
-```bash
-mvn spring-boot:run
-```
+This project lays a strong foundation. Future work to further mature the platform includes:
 
-The application will be available at `http://localhost:8080`.
+- **Software Supply Chain Security:** Implementing **Sigstore/Cosign** for cryptographic signing and verification of container images.
+- **Runtime Security:** Integrating **Falco** for real-time threat detection and automated response.
+- **Network Security:** Adding a service mesh like **Istio** to enforce mutual TLS (mTLS) for all in-cluster communication.
+- **Advanced Testing:** Completing the pipeline with **Cypress** for End-to-End (E2E) tests and **OWASP ZAP** for Dynamic Application Security Testing (DAST).
 
-## Running the Tests
+## Important Note: Repository Scope
 
-To run all the tests (both unit and integration), run the following command:
+**NB:** This repository contains the **application source code** (backend and frontend) and the **DevSecOps CI/CD pipeline** (`.gitlab-ci.yml`) responsible for testing, scanning, and building the application.
 
-```bash
-mvn test
-```
+The setup and configuration of the underlying platform infrastructure (such as the RKE2 cluster, HashiCorp Vault, FluxCD, and SonarQube) are managed in a separate **GitOps infrastructure repository**. The Keycloak instance, which provides OIDC authentication, was installed and configured manually.
